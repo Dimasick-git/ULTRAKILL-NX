@@ -117,7 +117,14 @@ gh('release','upload',TAG,str(checksums),str(GAME/'README_RU.txt'),'--repo',REPO
 body=current['body'].replace('сборка **r22**','сборка **r23**')
 body=body.replace('Полные ZIP ниже остаются r22.','Полные ZIP ниже уже содержат r23; маленький архив нужен только для обновления существующей установки.')
 body=body.replace('.\n### Скачать','.\n\n### Скачать')
-for item in report:body=body.replace(old_assets[item['name']]['digest'].removeprefix('sha256:'),item['sha256'])
+for item in report:
+    body=body.replace(old_assets[item['name']]['digest'].removeprefix('sha256:'),item['sha256'])
+    lines=body.splitlines()
+    for index,line in enumerate(lines):
+        if line.startswith('| [') and item['name'] in line:
+            size=f"{item['bytes']/1e9:.2f}".replace('.',',')
+            lines[index]=line.rsplit('|',2)[0]+f'| {size} ГБ |'
+    body='\n'.join(lines)+'\n'
 bullet='- Автоматический GC с остановкой потоков Horizon и сохранением полного регистрового контекста.\n'
 if bullet not in body:body=body.replace('### В этой сборке\n\n','### В этой сборке\n\n'+bullet)
 notes=OUT/'notes.md';notes.write_text(body,encoding='utf-8')
