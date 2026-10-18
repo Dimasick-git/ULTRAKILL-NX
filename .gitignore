@@ -9,6 +9,7 @@ out/
 *.symbols.zip
 offsets.ini
 __pycache__/
+release-work/
 *.keys
 prod.keys
 *.nsp
