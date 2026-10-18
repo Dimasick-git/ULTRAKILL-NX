@@ -1,0 +1,13 @@
+<!-- Стрипинг IL2CPP не должен выкинуть то, что NxGyroAim достаёт отражением. -->
+<linker>
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="CameraController" preserve="all"/>
+  </assembly>
+  <assembly fullname="NxPort" preserve="all"/>
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.Object" preserve="fields"/>
+  </assembly>
+  <assembly fullname="UnityEngine.VideoModule">
+    <type fullname="UnityEngine.Video.VideoPlayer" preserve="all"/>
+  </assembly>
+</linker>

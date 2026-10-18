@@ -1,0 +1,30 @@
+name: Баг или вылет
+description: Ошибка при запуске, на уровне или в управлении
+title: "[Bug] "
+body:
+  - type: input
+    id: build
+    attributes:
+      label: Версия сборки
+      placeholder: r1 / r22
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Консоль и окружение
+      description: Модель Switch, Atmosphère, портатив/док, частоты CPU/GPU/RAM.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Что произошло
+      description: Уровень, действие перед ошибкой, как повторить и что ожидалось.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Журнал и скриншоты
+      description: Перетащи debug.log из switch/ultrakill и свежий отчёт из atmosphere/crash_reports, если он есть.

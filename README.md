@@ -1,28 +1,115 @@
-# ULTRAKILL - NX
+<p align="center"><img src="docs/images/icon.png" width="168" alt="ULTRAKILL - NX"></p>
+<h1 align="center">ULTRAKILL — NX</h1>
+<p align="center">ULTRAKILL на Nintendo Switch.<br>Неофициальный homebrew-порт от <a href="https://github.com/Dimasick-git">Dimasick-git</a>.</p>
+<p align="center"><a href="https://github.com/Dimasick-git/ULTRAKILL-NX/releases/tag/r1">Скачать r1</a> · <a href="#установка">Установка</a> · <a href="https://github.com/Dimasick-git/ULTRAKILL-NX/issues/new/choose">Сообщить о баге</a> · <a href="docs/BUILD.md">Сборка из исходников</a></p>
 
-Приватные тестовые сборки порта ULTRAKILL для Nintendo Switch от **Dimasick-git**.
+![0-2 — THE MEATGRINDER на Nintendo Switch](docs/images/meatgrinder.jpg)
 
-## Скачать r1
+Работают управление с контроллера, прицеливание гироскопом, звук и видеоролики.
+Проверены запуск, обучение и переход к **0-2: THE MEATGRINDER**. Порт ещё тестируется;
+прохождение всей игры пока не проверено.
 
-Открой [релиз r1](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/tag/r1) и скачай оба файла `ULTRAKILL_NX_r1.zip.001` и `ULTRAKILL_NX_r1.zip.002`, а также `JOIN_ARCHIVE.cmd` в одну папку.
+Скриншоты сняты на настоящем Switch с разгоном. Частоты видны в оверлее.
+Цель — 60 FPS, но в тяжёлых сценах бывают просадки. Стабильные 60 на всех уровнях не обещаются.
 
-На Windows запусти `JOIN_ARCHIVE.cmd`: он объединит части в `ULTRAKILL_NX_r1.zip`. Распакуй полученный ZIP. Также можно распаковать `.001` через 7-Zip, если рядом лежит `.002`.
+## Скачать
 
-`Source code (zip)` не содержит игру. Нужны файлы из раздела Assets релиза.
+**[Тестовый релиз r1](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/tag/r1)** — актуальная сборка **r22**.
+
+Скачай **оба обычных ZIP**:
+
+- [ULTRAKILL_NX_r1_1of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_1of2.zip)
+- [ULTRAKILL_NX_r1_2of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_2of2.zip)
+
+Распакуй содержимое обоих в **одну папку**, согласившись на объединение папок
+`switch`. Порядок не важен. Склейка и дополнительные скрипты не нужны.
+Внутри — сборка, HOME-форвардер и инструкция. Размеры и SHA-256 указаны в релизе.
+Кнопка GitHub **Source code** скачивает только исходники порта.
 
 ## Установка
 
-1. Нужен Switch с настроенной Atmosphere и DBI.
-2. Скопируй папку `switch` из распакованного архива в корень microSD с объединением папок.
-3. Установи `ULTRAKILL_NX_forwarder.nsp` через DBI с заменой прежнего форвардера, если он установлен.
-4. Запускай **ULTRAKILL - NX** с HOME в режиме полноценного приложения.
+Нужен Nintendo Switch с Atmosphère и DBI.
 
-Первый релиз r1 содержит внутреннюю сборку r18: ограничение кэша шейдеров, исправленные направления обеих осей гироскопа, новую иконку и подпись Dimasick-git. Номер r18 внутри загрузчика и инструкции обозначает внутреннюю сборку.
+1. Распакуй оба ZIP на ПК в одну папку с объединением содержимого.
+2. Скопируй папку `switch` в корень microSD с объединением папок.
+3. Установи `ULTRAKILL_NX_forwarder.nsp` через DBI.
+4. Безопасно извлеки карту и запускай **ULTRAKILL - NX** с HOME.
 
-## Тестирование
+```text
+microSD/
+└── switch/
+    └── ultrakill/
+        ├── ultrakill_nx.nro
+        ├── config.txt
+        ├── offsets.ini
+        ├── libil2cpp.so
+        ├── libmain.so
+        ├── libunity.so
+        └── assets/
+```
 
-Проверь запуск, изображение, звук, обучение, кнопки и гироскоп. При проблеме сохрани `switch/ultrakill/debug.log` и создай issue с моделью консоли и описанием сбоя.
+Первый запуск и загрузка уровней могут занять время. Запускай через HOME-форвардер:
+игре нужна память полноценного приложения.
 
-Личные сохранения, журналы и ключи в сборку не включены. Контрольные суммы находятся в `SHA256SUMS.txt` релиза.
+**Обновление:** сохрани папки `Saves` и `Preferences`, замени файлы сборки и верни
+свои сохранения и настройки. Удали служебную папку `switch/ultrakill/il2cpp`,
+чтобы движок создал кэш метаданных заново. Если форвардер уже установлен,
+переустанавливать его не требуется.
 
-Репозиторий приватный: для скачивания требуется приглашение и вход в GitHub.
+## Управление
+
+| Switch | Действие |
+| :-- | :-- |
+| Левый / правый стик | Движение / обзор |
+| ZR / ZL | Основной / дополнительный огонь |
+| B — нижняя кнопка | Прыжок |
+| + | Пауза |
+| Гироскоп | Точная доводка прицела |
+
+Остальные действия и привязки доступны в настройках игры. Кнопки передаются
+позиционно, как на Xbox: нижняя кнопка Switch B соответствует South.
+
+Гироскоп включён по умолчанию. Параметры — в `switch/ultrakill/config.txt`:
+
+| Параметр | Значение по умолчанию | Назначение |
+| :-- | :-- | :-- |
+| `gyro` | `1` | `0` — выключить гироскоп |
+| `gyro_sens` | `2` | Чувствительность |
+| `gyro_invert_x` / `gyro_invert_y` | `1` / `1` | Инверсия осей; меняется отдельно |
+| `render_height` | `540` | Внутренняя высота рендера |
+
+## Кадры с консоли
+
+| Терминал | Оружие |
+| :--: | :--: |
+| ![Терминал в игре](docs/images/terminal.jpg) | ![Меню оружия](docs/images/terminal-close.jpg) |
+
+## Что вошло в r1
+
+- Гироскоп с исправленными направлениями обеих осей.
+- Потоковое воспроизведение видео и звука.
+- Исправление лишних нажатий крестовины при удержании курков.
+- Исправление вылета при диагностическом снимке потоков.
+- Профиль рендера 540p, ограниченный кэш шейдеров и уменьшенный gore.
+
+Подробности — в [списке изменений](CHANGELOG.md).
+
+## Если что-то сломалось
+
+[Создай issue](https://github.com/Dimasick-git/ULTRAKILL-NX/issues/new/choose): укажи
+модель Switch, уровень, действие перед ошибкой и настройки разгона. Приложи
+`switch/ultrakill/debug.log` и, если есть, свежий отчёт из `atmosphere/crash_reports`.
+
+## Авторы
+
+Порт, интеграция и тестирование — **Dimasick-git**.
+
+ULTRAKILL — **Arsi “Hakita” Patala / New Blood Interactive**. Порт не связан с
+Nintendo и авторами оригинальной игры. Поддержите оригинальную игру.
+
+Загрузчик основан на работе **ChanseyIsTheBest**, **fgsfds** и **TheOfficialFloW**;
+форвардер — **nx-hbloader**. Используются devkitPro/libnx, Mesa/nouveau,
+SDL2 и libjpeg-turbo. Лицензии: [загрузчик](LICENSE.loader),
+[форвардер](forwarder/LICENSE.md). Подробнее — [CREDITS](CREDITS.md).
+
+<sub>Unofficial ULTRAKILL homebrew port for Nintendo Switch. Work in progress.</sub>
