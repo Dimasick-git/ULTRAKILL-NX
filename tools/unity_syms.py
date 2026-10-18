@@ -44,6 +44,9 @@ JNI = {
     "unity.app_target_fps": "_Z42Application_Set_Custom_PropTargetFrameRatei",
     "unity.app_stacktrace": "_Z39Application_CUSTOM_SetStackTraceLogType7LogType17StackTraceLogType",
     "unity.screen_resolution": "_Z36Screen_CUSTOM_SetResolution_Injectedii14FullscreenModeRK11RefreshRate",
+    "unity.umbra_load": "_ZN11UmbraModule13LoadUmbraTomeEPKhm",
+    "unity.umbra_init": "_ZN5Umbra10TomeLoader14loadFromBufferEPKhmPNS_9AllocatorE",
+    "unity.umbra_status": "_ZNK5Umbra4Tome9getStatusEv",
 }
 
 # Шаблоны инструкций, связанных с регионами по 256 МБ (2^28), как в заплатке
@@ -327,7 +330,7 @@ def offsets_lines(lib, syms):
         lines += [f"patch.unity.region{i:02d} = 0x{a:x} 0x{f:08x} 0x{t:08x}"
                   for i, (k, a, f, t, n) in enumerate(regions)]
     for key, name in JNI.items():
-        if key.startswith(("unity.native", "unity.shader_", "unity.quality_", "unity.app_", "unity.screen_")) or key == "unity.initJni":
+        if key.startswith(("unity.native", "unity.shader_", "unity.quality_", "unity.app_", "unity.screen_", "unity.umbra_")) or key == "unity.initJni":
             if name in syms:
                 lines.append(f"{key} = 0x{syms[name][0]:x}")
     values, vnotes = find_values(lib, syms)

@@ -25,6 +25,9 @@
 #include <unistd.h>      /* dup */
 #include "imports.h"   /* DynLibFunction */
 #include "diag.h"
+#include "nx_cpu.h"
+#include "nx_dladdr.h"
+#include "nx_shader_diag.h"
 
 extern int debugPrintf(char *text, ...);  /* util.c */
 extern long z_lseek(int fd, long off, int whence);  /* libc_shim.c */
@@ -209,16 +212,19 @@ DynLibFunction unity_dynlib_functions[] = {
   { "clock", (uintptr_t)&clock },
   { "clock_getres", (uintptr_t)&clock_getres_fake },
   { "cos", (uintptr_t)&cos },
+  { "cosh", (uintptr_t)&cosh },
+  { "sinh", (uintptr_t)&sinh },
+  { "tanh", (uintptr_t)&tanh },
   { "difftime", (uintptr_t)&difftime },
   { "div", (uintptr_t)&div },
-  { "dladdr", (uintptr_t)&z_stub0 },
+  { "dladdr", (uintptr_t)&nx_dladdr },
   { "dup", (uintptr_t)&z_dup },
   { "eglChooseConfig", (uintptr_t)&eglChooseConfig },
   { "eglCreatePbufferSurface", (uintptr_t)&eglCreatePbufferSurface },
   { "eglGetCurrentContext", (uintptr_t)&eglGetCurrentContext },
   { "eglGetCurrentSurface", (uintptr_t)&eglGetCurrentSurface },
   { "eglGetError", (uintptr_t)&eglGetError },
-  { "eglGetProcAddress", (uintptr_t)&eglGetProcAddress },
+  { "eglGetProcAddress", (uintptr_t)&nx_egl_get_proc },
   { "eglQueryString", (uintptr_t)&eglQueryString },
   { "eglSurfaceAttrib", (uintptr_t)&eglSurfaceAttrib },
   { "eglSwapInterval", (uintptr_t)&eglSwapInterval },
@@ -276,8 +282,8 @@ DynLibFunction unity_dynlib_functions[] = {
   { "raise", (uintptr_t)&raise },
   { "recvmsg", (uintptr_t)&z_stub0 },
   { "scalbn", (uintptr_t)&scalbn },
-  { "sched_getaffinity", (uintptr_t)&z_stub0 },
-  { "sched_setaffinity", (uintptr_t)&z_stub0 },
+  { "sched_getaffinity", (uintptr_t)&nx_sched_getaffinity },
+  { "sched_setaffinity", (uintptr_t)&nx_sched_setaffinity },
   { "sem_getvalue", (uintptr_t)&z_stub0 },
   { "sendmsg", (uintptr_t)&z_stub0 },
   { "setbuf", (uintptr_t)&setbuf },

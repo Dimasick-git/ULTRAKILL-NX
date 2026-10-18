@@ -28,6 +28,8 @@
 #include <malloc.h>
 #include "config.h"
 #include "nx_gameroot.h"   /* runtime game folder (was hardcoded GAME_HOME) */
+#include "nx_cpu.h"
+#include "nx_shader_diag.h"
 #include <wchar.h>
 #include <wctype.h>
 #include <time.h>
@@ -143,6 +145,7 @@ int gettid_fake(void) {
 #define ARM64_SYS_GETTID            178
 #define ARM64_SYS_FUTEX             98
 #define ARM64_SYS_SCHED_SETAFFINITY 122
+#define ARM64_SYS_SCHED_GETAFFINITY 123
 #define ARM64_SYS_PROCESS_VM_READV  270
 #define ARM64_SYS_PROCESS_VM_WRITEV 271
 
@@ -227,7 +230,15 @@ long syscall_fake(long number, ...) {
       return futex_impl(uaddr, op, val, to);
     }
     case ARM64_SYS_SCHED_SETAFFINITY:
-      return 0; // affinity hints are advisory; pretend success
+    case ARM64_SYS_SCHED_GETAFFINITY: {
+      va_list va; va_start(va, number);
+      int pid = va_arg(va, int);
+      size_t size = va_arg(va, size_t);
+      void *set = va_arg(va, void *);
+      va_end(va);
+      if (number == ARM64_SYS_SCHED_SETAFFINITY) return nx_sched_setaffinity(pid, size, set);
+      return nx_sched_getaffinity(pid, size, set) == 0 ? (long)sizeof(uint64_t) : -1;
+    }
     case ARM64_SYS_PROCESS_VM_READV:
     case ARM64_SYS_PROCESS_VM_WRITEV: {
       /* Self memory copy used as a fault-safe read/write probe. Stubbing it to
@@ -294,7 +305,7 @@ long sysconf_fake(int name) {
     case BIONIC_SC_PAGESIZE:
     case BIONIC_SC_PAGE_SIZE: return 0x1000;
     case BIONIC_SC_NPROCESSORS_CONF:
-    case BIONIC_SC_NPROCESSORS_ONLN: return 3;
+    case BIONIC_SC_NPROCESSORS_ONLN: return nx_cpu_count();
     // Report 512 MB (matches synthetic /proc/meminfo MemTotal) to make Unity's
     // DynamicHeap reserve fewer 256MB regions; real backing (arena/OC) holds more.
     case BIONIC_SC_PHYS_PAGES: return (512ll * 1024 * 1024) / 0x1000;
@@ -1530,15 +1541,12 @@ static const char *synthetic_proc(const char *path) {
            "SwapTotal:            0 kB\n"
            "SwapFree:             0 kB\n";
   if (!strcmp(path, "/proc/cpuinfo"))
-    return "processor\t: 0\nprocessor\t: 1\nprocessor\t: 2\n"
-           "Features\t: fp asimd aes pmull sha1 sha2 crc32\n"
-           "CPU implementer\t: 0x41\nCPU architecture: 8\nCPU variant\t: 0x1\n"
-           "CPU part\t: 0xd07\nCPU revision\t: 1\n";
+    return nx_cpu_info();
   if (strstr(path, "cpu_capacity")) return "1024\n";
   if (strstr(path, "cpuinfo_max_freq") || strstr(path, "scaling_max_freq")) return "1785000\n";
   if (strstr(path, "cpuinfo_min_freq") || strstr(path, "scaling_min_freq")) return "1020000\n";
   if (strstr(path, "/cpu/possible") || strstr(path, "/cpu/present") || strstr(path, "/cpu/online"))
-    return "0-2\n";
+    return nx_cpu_list();
   if (!strncmp(path, "/proc/", 6) || !strncmp(path, "/sys/", 5)) return ""; // empty for the rest
   return NULL;
 }
@@ -1841,7 +1849,7 @@ void *dlsym_fake(void *handle, const char *symbol) {
   /* 3) the full GLES/EGL API (~150 entry points) lives in mesa, beyond our
    *    static table -- resolve any gl or egl symbol via eglGetProcAddress. */
   if (!strncmp(symbol, "gl", 2) || !strncmp(symbol, "egl", 3)) {
-    p = (void *)eglGetProcAddress(symbol);
+    p = (void *)nx_egl_get_proc(symbol);
     if (p) { debugPrintf("dlsym(%s) -> %p [egl]\n", symbol, p); return p; }
   }
   debugPrintf("dlsym(%s) -> NULL\n", symbol);

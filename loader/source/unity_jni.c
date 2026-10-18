@@ -257,8 +257,12 @@ void *unity_dispatch_object(void *recv, const void *id_, va_list va){ const stru
       const char *def = defobj ? jni_string_utf(defobj) : NULL;
       KV*kv=kv_get(key);
       const char *val = kv ? kv->val : (def ? def : "");
-      debugPrintf("[prefs] getString '%s' -> '%s' (%s)\n",
-                  key ? key : "(null)", val, kv ? "stored" : "default");
+      /* A service can read this once per frame. Trace initial reads only; do
+       * not format values or take the SD log lock on the steady-state path. */
+      static unsigned traced_reads;
+      if (__atomic_fetch_add(&traced_reads, 1, __ATOMIC_RELAXED) < 16)
+        debugPrintf("[prefs] getString '%s' (%s)\n",
+                    key ? key : "(null)", kv ? "stored" : "default");
       return jni_make_string(val);
     }
     if (has(m,"getAll")){                 /* Unity PlayerPrefs LOAD entry point */

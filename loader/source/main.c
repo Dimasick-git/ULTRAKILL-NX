@@ -29,11 +29,13 @@
 #include "nx_bridge.h"
 #include "nx_video.h"
 #include "nx_gc.h"
+#include "nx_cpu.h"
 #include <dirent.h>
 #include <strings.h>  /* strncasecmp */
 #include "util.h"
 #include "error.h"
 #include "so_util.h"
+extern void nx_umbra_install(so_module *mod);
 #include "imports.h"
 #include "jni_fake.h"
 #include "android_native_unity.h"
@@ -811,17 +813,19 @@ static void nx_apply_performance_profile(void) {
     g_trace_exception_active = 1;
     ((void (*)(int, int))(ub + trace))(4, 2); /* Exception, Full */
   }
-  if (!config.performance_mode) return;
+  if (!config.performance_mode && !config.fsr) return;
   const uint32_t resolution = nxo_get("unity.screen_resolution");
   if (resolution) {
     const struct { uint32_t numerator, denominator; } refresh = { 60, 1 };
     /* Keep the real NWindow unchanged. Unity's existing software-resolution
      * fallback renders into this smaller target and blits to the native panel. */
+    const int output_height = config.fsr ? 720 : config.render_height;
     ((void (*)(int, int, int, const void *))(ub + resolution))(
-        config.render_height * 16 / 9, config.render_height, 1, &refresh);
-    debugPrintf("[perf-profile] requested software render %dx%d (native window unchanged)\n",
-                config.render_height * 16 / 9, config.render_height);
+        output_height * 16 / 9, output_height, 1, &refresh);
+    debugPrintf("[perf-profile] Unity output %dx%d world_height=%d fsr_requested=%d\n",
+                output_height * 16 / 9, output_height, config.render_height, config.fsr);
   }
+  if (!config.performance_mode) return;
   const struct { const char *key; int value; } settings[] = {
     { "unity.quality_mip_limit", 1 }, /* half width/height for mipmapped textures */
     { "unity.quality_shadows", 0 },
@@ -866,7 +870,8 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx switch-ui-r24 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r28 (Unity Android / IL2CPP) ===\n");
+  nx_cpu_init();
   {
     u64 program = 0;
     svcGetInfo(&program, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0);
@@ -1153,6 +1158,7 @@ int main(int argc, char *argv[]) {
    * load_module faulted at boot (fbstub94: stock .so on SD, PC in the patch
    * path before finalize). */
   nx_patch_libunity((uintptr_t)unity_mod.load_virtbase);
+  nx_umbra_install(&unity_mod);
 
   /* (A Zookeeper-era diagnostic lived here: it read libunity+0xc44c34 to check
    * whether a stack-canary patch had reached the executed code. It is REMOVED.
@@ -1326,16 +1332,22 @@ int main(int argc, char *argv[]) {
 
       /* r23: the matching Boehm backend pauses actual Horizon threads and
        * publishes their stacks/register roots. Keep its normal collection mode.
-       * Legacy libraries retain the old disabled-GC fallback until updated. */
+       * Reject an older library rather than running with unbounded garbage. */
       if (nx_gc_backend_ready()) {
+        /* Matched il2cpp-api-types.h: DISABLED=0, ENABLED=1, MANUAL=2.
+         * Verify the backend state instead of trusting this request. */
+        enum { NX_IL2CPP_GC_MODE_ENABLED = 1 };
         typedef void (*fn_set_mode)(int);
         fn_set_mode set_mode = (fn_set_mode)so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_set_mode");
-        if (set_mode) set_mode(0); /* IL2CPP_GC_MODE_ENABLED */
-        debugPrintf("[gc] native STW backend ready; automatic collection enabled\n");
+        int (*is_disabled)(void) = (int (*)(void))so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_is_disabled");
+        if (!set_mode || !is_disabled)
+          fatal_error("GC mode exports are missing; copy the matching IL2CPP library.");
+        set_mode(NX_IL2CPP_GC_MODE_ENABLED);
+        const int disabled = is_disabled();
+        debugPrintf("[gc] native STW backend ready; requested_mode=1 disabled=%d\n", disabled);
+        if (disabled) fatal_error("GC enable failed; automatic collection is still disabled.");
       } else {
-        void (*disable)(void) = (void (*)(void))so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_disable");
-        if (disable) disable();
-        debugPrintf("[gc] ERROR: legacy IL2CPP without Horizon GC patch; collection disabled, update library\n");
+        fatal_error("IL2CPP has no Horizon GC backend. Copy the complete matching update, not only the NRO.");
       }
       /* Native TimeManager is repaired at its source. Keep managed Time APIs
        * untouched: deltaTime must switch to the physics step in FixedUpdate,

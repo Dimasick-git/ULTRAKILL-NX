@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "diag.h"
 #include "util.h"   /* debugPrintf */
@@ -40,6 +41,8 @@ typedef struct {
   volatile uint64_t     wakes_total;
   volatile uint64_t     futex_spins;
   volatile uint64_t     last_active;    /* tick of last beacon activity           */
+  uint64_t              cpu_previous;
+  int                   cpu_sampled;
 } DiagThread;
 
 static DiagThread       g_threads[DIAG_MAX_THREADS];
@@ -126,6 +129,20 @@ uint32_t diag_find_thread_handle(uintptr_t thread) {
     if (g_threads[i].in_use && (uintptr_t)g_threads[i].pth == thread)
       return g_threads[i].handle;
   return 0;
+}
+
+uint32_t diag_find_tid_handle(int tid) {
+  Handle result = 0;
+  mutexLock(&g_reg_lock);
+  for (int i = 0; i < DIAG_MAX_THREADS; ++i) {
+    DiagThread *t = &g_threads[i];
+    if (t->in_use && ((int)(t->tid & 0x7fffffff) == tid ||
+                         (tid == 1 && t->is_main_engine))) {
+      result = t->handle; break;
+    }
+  }
+  mutexUnlock(&g_reg_lock);
+  return result;
 }
 
 void diag_set_name(void *target_pthread, const char *name) {
@@ -425,6 +442,49 @@ static void dump_threads(int episode, uint64_t now) {
 
 static volatile int g_dump_req;   /* diag_request_dump(), ниже */
 
+/* Read scheduler accounting without stopping threads or walking stacks. Percent
+ * is one core's capacity, not process-wide occupancy or GPU time. */
+typedef struct { char name[32]; uint64_t tid, mask; double percent; } CpuSample;
+static int cpu_sample_compare(const void *a, const void *b) {
+  double x = ((const CpuSample *)a)->percent, y = ((const CpuSample *)b)->percent;
+  return (x < y) - (x > y);
+}
+static void report_cpu(uint64_t now) {
+  static uint64_t previous;
+  if (!previous) { previous = now; }
+  else if (tick_to_ns(now-previous) < 5000000000ull) return;
+  const uint64_t elapsed = now-previous;
+  CpuSample rows[DIAG_MAX_THREADS]; unsigned used = 0, errors = 0;
+  double total = 0;
+  mutexLock(&g_reg_lock);
+  for (int i = 0; i < DIAG_MAX_THREADS; ++i) {
+    DiagThread *t = &g_threads[i];
+    if (!t->in_use) continue;
+    u64 ticks = 0;
+    Result rc = svcGetInfo(&ticks, InfoType_ThreadTickCount, t->handle, UINT64_MAX);
+    if (R_FAILED(rc)) rc = svcGetInfo(&ticks, InfoType_ThreadTickCountDeprecated, t->handle, UINT64_MAX);
+    if (R_FAILED(rc)) { ++errors; continue; }
+    if (elapsed && t->cpu_sampled && ticks >= t->cpu_previous) {
+      CpuSample *row = &rows[used++];
+      memcpy(row->name, t->name, sizeof(row->name));
+      row->tid = t->tid;
+      row->percent = 100.0 * (double)(ticks-t->cpu_previous) / elapsed;
+      total += row->percent;
+      s32 preferred; row->mask = 0;
+      svcGetThreadCoreMask(&preferred, &row->mask, t->handle);
+    }
+    t->cpu_previous = ticks; t->cpu_sampled = 1;
+  }
+  mutexUnlock(&g_reg_lock);
+  previous = now;
+  if (!elapsed) return;
+  qsort(rows, used, sizeof(rows[0]), cpu_sample_compare);
+  debugPrintf("[cpu-perf] registered_threads=%.1f%% (100%%=one core) samples=%u errors=%u\n", total, used, errors);
+  for (unsigned i = 0; i < used && i < 5; ++i)
+    debugPrintf("[cpu-perf] %s tid=%llu cpu=%.1f%% affinity=0x%llx\n", rows[i].name,
+                (unsigned long long)rows[i].tid, rows[i].percent, (unsigned long long)rows[i].mask);
+}
+
 static void watchdog_main(void *unused) {
   (void)unused;
   int episode = 0;
@@ -434,6 +494,7 @@ static void watchdog_main(void *unused) {
   for (;;) {
     svcSleepThread(DIAG_POLL_NS);
     uint64_t now = now_tick();
+    report_cpu(now);
     if (g_dump_req) { g_dump_req = 0; dump_threads(0, now); }
     /* The render thread advances during a dump. Read its timestamp BEFORE
      * taking 'now', otherwise unsigned subtraction wraps into a fake stall. */

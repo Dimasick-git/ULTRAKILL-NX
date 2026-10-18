@@ -51,6 +51,9 @@ extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-sa
 #include "nx_perf.h"
 #include "nx_video.h"
 #include "nx_gc.h"
+#include "nx_shader_diag.h"
+#include "nx_log_repeat.h"
+extern void nxb_exception_trace(void);
 
 extern int *__errno(void);              // newlib
 
@@ -67,8 +70,21 @@ static int log_allowed(int prio) {
 }
 uint32_t g_port_exceptions;
 static void android_log_message(const char *tag, const char *text) {
-  if (text && strstr(text, "Exception"))
+  if (text && tag && !strcmp(tag, "Unity") && strstr(text, "Exception")) {
     __atomic_fetch_add(&g_port_exceptions, 1, __ATOMIC_RELAXED);
+    static Mutex repeat_lock;
+    static NxLogRepeat repeat;
+    unsigned suppressed;
+    mutexLock(&repeat_lock);
+    int emit = nx_log_repeat(&repeat, text, armGetSystemTick(),
+                             armNsToTicks(5000000000ULL), &suppressed);
+    if (suppressed)
+      debugPrintf("[diag] repeated Unity exception output suppressed=%u; total=%u\n",
+                  suppressed, __atomic_load_n(&g_port_exceptions, __ATOMIC_RELAXED));
+    if (emit) debugPrintf("%s: %s\n", tag, text);
+    mutexUnlock(&repeat_lock);
+    return;
+  }
   debugPrintf("%s: %s\n", tag, text);
 }
 
@@ -1001,7 +1017,7 @@ DynLibFunction dynlib_functions[] = {
   { "glGenTextures", (uintptr_t)&glGenTextures }, { "glGetAttribLocation", (uintptr_t)&glGetAttribLocation },
   { "glGetError", (uintptr_t)&glGetError }, { "glGetProgramiv", (uintptr_t)&glGetProgramiv },
   { "glGetShaderiv", (uintptr_t)&glGetShaderiv }, { "glGetUniformLocation", (uintptr_t)&glGetUniformLocation },
-  { "glLinkProgram", (uintptr_t)&glLinkProgram }, { "glPixelStorei", (uintptr_t)&glPixelStorei },
+  { "glLinkProgram", (uintptr_t)&nx_link_program }, { "glPixelStorei", (uintptr_t)&glPixelStorei },
   { "glPolygonOffset", (uintptr_t)&glPolygonOffset }, { "glReadPixels", (uintptr_t)&glReadPixels },
   { "glRenderbufferStorage", (uintptr_t)&glRenderbufferStorage }, { "glScissor", (uintptr_t)&glScissor },
   { "glShaderSource", (uintptr_t)&gl_ShaderSource_log }, { "glStencilFunc", (uintptr_t)&glStencilFunc },
@@ -1043,6 +1059,7 @@ DynLibFunction dynlib_functions[] = {
 
   // --- мост для C#-слоя ULTRAKILL: [DllImport("nxbridge")] (nx_bridge.c) ---
   { "nxb_gc_bridge_init", (uintptr_t)&nxb_gc_bridge_init },
+  { "nxb_exception_trace", (uintptr_t)&nxb_exception_trace },
   { "nxb_gc_begin", (uintptr_t)&nxb_gc_begin },
   { "nxb_gc_pause", (uintptr_t)&nxb_gc_pause },
   { "nxb_gc_resume", (uintptr_t)&nxb_gc_resume },

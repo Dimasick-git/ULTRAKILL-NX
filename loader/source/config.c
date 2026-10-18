@@ -22,7 +22,9 @@
   CONFIG_VAR_INT(gyro_invert_y); \
   CONFIG_VAR_INT(shader_chunks); \
   CONFIG_VAR_INT(performance_mode); \
-  CONFIG_VAR_INT(render_height);
+  CONFIG_VAR_INT(render_height); \
+  CONFIG_VAR_INT(fsr); \
+  CONFIG_VAR_FLOAT(fsr_sharpness);
 
 Config config;
 static int config_needs_rewrite = 0;
@@ -62,6 +64,8 @@ int read_config(const char *file) {
   config.shader_chunks = 16;
   config.performance_mode = 1;
   config.render_height = 540;
+  config.fsr = 0;
+  config.fsr_sharpness = 0.5f;
 
   FILE *f = fopen(file, "r");
   if (f == NULL)
@@ -96,7 +100,7 @@ int read_config(const char *file) {
     config.shader_chunks = 16;
     config_needs_rewrite = 1;
   }
-  if (config.render_height != 360 && config.render_height != 540 &&
+  if (config.render_height != 360 && config.render_height != 480 && config.render_height != 540 &&
       config.render_height != 720) {
     config.render_height = 540;
     config_needs_rewrite = 1;
@@ -104,6 +108,11 @@ int read_config(const char *file) {
 
   if (config.gyro_sens <= 0.0f || config.gyro_sens > 20.0f) {
     config.gyro_sens = 2.0f;
+    config_needs_rewrite = 1;
+  }
+  config.fsr = config.fsr ? 1 : 0;
+  if (!(config.fsr_sharpness >= 0.0f && config.fsr_sharpness <= 2.0f)) {
+    config.fsr_sharpness = 0.5f;
     config_needs_rewrite = 1;
   }
 
@@ -126,7 +135,9 @@ int write_config(const char *file) {
     "# gyro_invert_y -- 1 = инвертировать вертикаль гироскопа\n"
     "# shader_chunks -- кэш шейдеров: 1..32 блоков по 16 MiB; default 16\n"
     "# performance_mode -- 1 = профиль 60 FPS с облегчённой графикой\n"
-    "# render_height -- внутренний рендер 360/540/720; default 540\n"
+    "# render_height -- внутренний рендер 360/480/540/720; default 540\n"
+    "# fsr -- 1 = experimental FSR1 EASU+RCAS (requires r26 bundle); default 0\n"
+    "# fsr_sharpness -- RCAS attenuation 0..2; 0 strongest, default 0.5\n"
     "#\n"
     "\n");
 

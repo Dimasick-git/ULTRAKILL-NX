@@ -201,11 +201,14 @@ int nxb_config_int(const char *key) {
   if (!strcmp(key, "gyro_invert_x")) return config.gyro_invert_x;
   if (!strcmp(key, "gyro_invert_y")) return config.gyro_invert_y;
   if (!strcmp(key, "docked_1080p"))  return config.docked_1080p;
+  if (!strcmp(key, "fsr"))           return config.fsr;
+  if (!strcmp(key, "render_height")) return config.render_height;
   return 0;
 }
 
 float nxb_config_float(const char *key) {
   if (key && !strcmp(key, "gyro_sens")) return config.gyro_sens;
+  if (key && !strcmp(key, "fsr_sharpness")) return config.fsr_sharpness;
   return 0.0f;
 }
 
