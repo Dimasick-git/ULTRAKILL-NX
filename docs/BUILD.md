@@ -28,7 +28,9 @@ make -C loader -j4
 3. Открыть в Unity 2022.3.29f1 с Android Build Support, NDK и OpenJDK.
 4. Выполнить `NxInputCheck.Export` через `-executeMethod` в batchmode:
    проверка кнопок через настоящий Input System, затем экспорт Gradle-проекта.
-5. Скомпилировать экспортированный C++ через его `il2cpp.exe --compile-cpp`:
+5. Для backend GC r23 применить `tools/patch_gc_horizon.py` к экспортированному
+   `IL2CPP/external/bdwgc/pthread_stop_world.c`. Подробнее: [GC-r23.md](GC-r23.md).
+6. Скомпилировать экспортированный C++ через его `il2cpp.exe --compile-cpp`:
    Android, arm64, Release, NDK этой версии Unity. Пути берутся из
    экспортированного `unityLibrary/build.gradle`.
 

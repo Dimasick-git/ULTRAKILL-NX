@@ -28,6 +28,7 @@
 #include "nx_offsets.h"
 #include "nx_bridge.h"
 #include "nx_video.h"
+#include "nx_gc.h"
 #include <dirent.h>
 #include <strings.h>  /* strncasecmp */
 #include "util.h"
@@ -156,7 +157,12 @@ static float (*g_icall_time)(void), (*g_icall_utime)(void);
 static void  (*g_icall_active_scene)(int *);
 static void *(*g_icall_scene_name)(int);
 static int   (*g_icall_scene_count)(void);
+static int64_t (*g_gc_used)(void), (*g_gc_heap)(void);
+static int (*g_gc_disabled)(void);
 static void nx_diag_bind(so_module *il2cpp) {
+  g_gc_used = (int64_t (*)(void))so_try_find_addr_rx(il2cpp, "il2cpp_gc_get_used_size");
+  g_gc_heap = (int64_t (*)(void))so_try_find_addr_rx(il2cpp, "il2cpp_gc_get_heap_size");
+  g_gc_disabled = (int (*)(void))so_try_find_addr_rx(il2cpp, "il2cpp_gc_is_disabled");
   typedef void *(*fn_resolve)(const char *);
   fn_resolve r = (fn_resolve)so_try_find_addr_rx(il2cpp, "il2cpp_resolve_icall");
   if (!r) return;
@@ -171,6 +177,11 @@ static void nx_diag_bind(so_module *il2cpp) {
               (void *)g_icall_scene_name, (void *)g_icall_scene_count);
 }
 static void nx_diag_tick(int frame) {
+  if (g_gc_used && g_gc_heap)
+    debugPrintf("[gc] managed used=%lld MB heap=%lld MB disabled=%d native_stw=%d stw_passes=%u\n",
+                (long long)(g_gc_used() >> 20), (long long)(g_gc_heap() >> 20),
+                g_gc_disabled ? g_gc_disabled() : -1, nx_gc_backend_ready(),
+                nx_gc_stop_count());
   char name[96] = "?";
   if (g_icall_active_scene && g_icall_scene_name) {
     int handle = 0;
@@ -855,7 +866,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx safe-diagnostics-r22 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx native-gc-r23 (Unity Android / IL2CPP) ===\n");
   {
     u64 program = 0;
     svcGetInfo(&program, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0);
@@ -1313,44 +1324,19 @@ int main(int argc, char *argv[]) {
        * What remains is the part that is about the engine rather than the game.
        * ------------------------------------------------------------------- */
 
-      /* Boehm GC.  The real fix lives in libc_shim.c: pthread_kill_gc() bridges
-       * the stop-the-world handshake, because il2cpp suspends threads with
-       * POSIX signals that the Switch never delivers, so the ack semaphore is
-       * never posted and the first stop-the-world would hang forever.  Its four
-       * globals are re-derived for THIS libil2cpp -- see pp_il2cpp.h.
-       *
-       * On top of the bridge we also ask the runtime to stand the collector
-       * down, by symbol rather than by offset.  set_mode(1) clears the
-       * incremental-collector flag (Unity 2022 ships incremental GC on, and the
-       * incremental collector keeps doing stop-the-world mark steps regardless
-       * of GC_dont_gc), and gc_disable() suppresses ordinary collections.
-       *
-       * Timing matters here and is the reason this sits at frame 0 rather than
-       * earlier: the PvZ port tried calling gc_disable() during il2cpp_init and
-       * deadlocked on a GC lock held by a helper thread that had not started
-       * running yet.  By frame 0 the runtime is fully up.  If you ever see the
-       * boot wedge immediately after "[boot] gc_set_mode", delete these two
-       * calls -- the bridge alone is sufficient, and letting the GC run behind
-       * it is what the Very Little Nightmares port does. */
-      typedef void (*fn_set_mode)(int);
-      typedef void (*fn_void)(void);
-      fn_set_mode il2cpp_gc_set_mode =
-          (fn_set_mode)so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_set_mode");
-      fn_void il2cpp_gc_disable =
-          (fn_void)so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_disable");
-      if (il2cpp_gc_set_mode) {
-        il2cpp_gc_set_mode(1);   /* IL2CPP_GC_MODE_DISABLED */
-        debugPrintf("[boot] gc_set_mode(DISABLED) -> incremental GC off\n");
+      /* r23: the matching Boehm backend pauses actual Horizon threads and
+       * publishes their stacks/register roots. Keep its normal collection mode.
+       * Legacy libraries retain the old disabled-GC fallback until updated. */
+      if (nx_gc_backend_ready()) {
+        typedef void (*fn_set_mode)(int);
+        fn_set_mode set_mode = (fn_set_mode)so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_set_mode");
+        if (set_mode) set_mode(0); /* IL2CPP_GC_MODE_ENABLED */
+        debugPrintf("[gc] native STW backend ready; automatic collection enabled\n");
       } else {
-        debugPrintf("[boot] WARNING: il2cpp_gc_set_mode not found\n");
+        void (*disable)(void) = (void (*)(void))so_try_find_addr_rx(&il2cpp_mod, "il2cpp_gc_disable");
+        if (disable) disable();
+        debugPrintf("[gc] ERROR: legacy IL2CPP without Horizon GC patch; collection disabled, update library\n");
       }
-      if (il2cpp_gc_disable) { il2cpp_gc_disable(); debugPrintf("[boot] gc_disable() -> GC off\n"); }
-      else debugPrintf("[boot] WARNING: il2cpp_gc_disable not found; GC stays on behind the bridge\n");
-      /* NOTE: the Zookeeper base also poked its incremental-GC flag directly by
-       * offset as a belt-and-braces third step.  That offset is specific to its
-       * libil2cpp and there is no safe equivalent to guess here, so the API
-       * calls above are the whole story.  They do the same job. */
-
       /* Native TimeManager is repaired at its source. Keep managed Time APIs
        * untouched: deltaTime must switch to the physics step in FixedUpdate,
        * frameCount must follow engine frames, and real time must stay monotonic. */

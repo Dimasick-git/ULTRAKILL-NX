@@ -50,6 +50,7 @@ extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-sa
 #include "nx_bridge.h"
 #include "nx_perf.h"
 #include "nx_video.h"
+#include "nx_gc.h"
 
 extern int *__errno(void);              // newlib
 
@@ -1041,6 +1042,12 @@ DynLibFunction dynlib_functions[] = {
   { "ASensorEventQueue_getEvents", (uintptr_t)&ASensorEventQueue_getEvents },
 
   // --- мост для C#-слоя ULTRAKILL: [DllImport("nxbridge")] (nx_bridge.c) ---
+  { "nxb_gc_bridge_init", (uintptr_t)&nxb_gc_bridge_init },
+  { "nxb_gc_begin", (uintptr_t)&nxb_gc_begin },
+  { "nxb_gc_pause", (uintptr_t)&nxb_gc_pause },
+  { "nxb_gc_resume", (uintptr_t)&nxb_gc_resume },
+  { "nxb_gc_roots", (uintptr_t)&nxb_gc_roots },
+  { "nxb_gc_end", (uintptr_t)&nxb_gc_end },
   { "nxb_version", (uintptr_t)&nxb_version },
   { "nxb_pad", (uintptr_t)&nxb_pad },
   { "nxb_motion", (uintptr_t)&nxb_motion },

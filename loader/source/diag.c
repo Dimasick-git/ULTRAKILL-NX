@@ -15,6 +15,7 @@
 #include "util.h"   /* debugPrintf */
 #include "so_util.h" /* so_find_module_by_addr for backtrace symbolication */
 #include "diag_memory.h"
+#include "nx_gc.h"
 
 /* ------------------------------------------------------------------ tunables */
 #define DIAG_MAX_THREADS   96
@@ -115,6 +116,16 @@ void diag_thread_unregister(void) {
   self->in_use = 0;
   mutexUnlock(&g_reg_lock);
   self = NULL;
+}
+
+/* GC owns its thread-table lock: a registered target cannot finish unregistering
+ * until collection ends. Do not acquire g_reg_lock after pausing another thread
+ * which might own it. Registration completes before entering guest code. */
+uint32_t diag_find_thread_handle(uintptr_t thread) {
+  for (int i = 0; i < DIAG_MAX_THREADS; ++i)
+    if (g_threads[i].in_use && (uintptr_t)g_threads[i].pth == thread)
+      return g_threads[i].handle;
+  return 0;
 }
 
 void diag_set_name(void *target_pthread, const char *name) {
@@ -328,11 +339,13 @@ static void snapshot_thread(DiagThread *t) {
   int want = (strstr(t->name, "Main") || strstr(t->name, "Preload") ||
               strstr(t->name, "AsyncRead") || strstr(t->name, "GfxDevice") || t->is_main_engine);
   if (!want) return;
+  if (!nx_gc_snapshot_begin()) return; /* never resume a thread owned by GC */
   ThreadContext ctx;
   Result pr = svcSetThreadActivity(t->handle, ThreadActivity_Paused);
   Result gr = R_SUCCEEDED(pr) ? svcGetThreadContext3(&ctx, t->handle) : pr;
   if (R_FAILED(gr)) {
     if (R_SUCCEEDED(pr)) svcSetThreadActivity(t->handle, ThreadActivity_Runnable);
+    nx_gc_snapshot_end();
     debugPrintf("[wd]   %-16s (snapshot failed rc=0x%x)\n", t->name, gr);
     return;
   }
@@ -343,6 +356,7 @@ static void snapshot_thread(DiagThread *t) {
   dump_thread_context(t->name[0] ? t->name : "?", &ctx);
   g_scan_stack = 0;
   if (R_SUCCEEDED(pr)) svcSetThreadActivity(t->handle, ThreadActivity_Runnable);
+  nx_gc_snapshot_end();
   debugPrintf("%s", g_dump_buf);
 }
 

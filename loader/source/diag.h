@@ -57,6 +57,7 @@ void diag_frame(int frame);
 /* Spawn the watchdog. Idempotent. Call once after boot, before the loop. */
 void diag_watchdog_start(void);
 void diag_request_dump(void);   /* снимок стеков в журнал при следующем опросе сторожа */
+uint32_t diag_find_thread_handle(uintptr_t thread);
 
 #ifdef __cplusplus
 }

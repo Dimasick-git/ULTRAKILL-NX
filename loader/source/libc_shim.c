@@ -1919,34 +1919,17 @@ int sem_timedwait_fake(void **s, const struct timespec *abs) {
   return -1;
 }
 
-/* --- Boehm GC stop-the-world bridge -------------------------------------
- * il2cpp's Boehm GC stops the world by sending every other thread a suspend
- * signal via pthread_kill; each target's signal handler sem_posts an ack and
- * parks in sigsuspend, and GC_stop_world / GC_start_world sem_wait on those
- * acks. POSIX signals are never delivered on Switch (pthread_kill is a no-op),
- * so the acks never arrive and the first collection hangs forever inside
- * GC_stop_world -- the verified boot wall.
- *
- * sem_post/sem_wait themselves work here (real libnx Semaphore underneath), so
- * we make pthread_kill itself post the ack that the never-delivered handler
- * would have posted. Every thread the GC suspends is already parked in our own
- * shim (idle worker / background waits), so not literally suspending them is
- * fine for the brief mark window. The signal numbers, the start-world ack gate
- * and the ack semaphore are all il2cpp globals -- offsets recovered by
- * disassembling this exact 62f2 libil2cpp's GC_stop_world and suspend handler:
- *   suspend signal   = *(int*)(il2cpp + 0x2376cac)   (sigaddset + pthread_kill arg)
- *   restart signal   = *(int*)(il2cpp + 0x2376cb0)
- *   start-world ack? = *(int*)(il2cpp + 0x2376ca8)   (handler's 2nd sem_post gate)
- *   ack semaphore    =  (void**)(il2cpp + 0x25936c0)  (FakeSem* storage; handler
- *                                                       does sem_post on this)
- * Before GC init these globals are zero: suspend/restart sigs read 0 (never
- * match a real signal) and the ack-sem storage is NULL (sem_post_fake no-ops),
- * so this is inert until the GC is actually up. */
+/* Legacy signal acknowledgments for pre-r23 libraries only. They do not
+ * suspend mutators or publish roots and are NOT a valid collector backend.
+ * main.c leaves collection disabled when such an old library is loaded.
+ * r23's patched Boehm uses nx_gc.c callbacks instead; unexpected signal-based
+ * suspension with that backend fails rather than acknowledging a live thread. */
 uintptr_t g_il2cpp_base = 0;
 
 /* Смещения берутся из offsets.ini нашей сборки (nx_offsets.c); без них мост
  * молчит и сигналы GC уходят в пустоту, как обычный pthread_kill. */
 #include "nx_offsets.h"
+#include "nx_gc.h"
 
 int pthread_kill_gc(pthread_t t, int sig) {
   (void)t;
@@ -1965,6 +1948,9 @@ int pthread_kill_gc(pthread_t t, int sig) {
     int suspend_sig = *(volatile int *)(b + GC_SUSPEND_SIG_OFF);
     int restart_sig = *(volatile int *)(b + GC_RESTART_SIG_OFF);
     void **ack_sem  = (void **)(b + GC_ACK_SEM_OFF);
+    /* Patched Boehm uses explicit Horizon callbacks; unexpected POSIX suspend
+     * paths must never silently claim that a running thread was suspended. */
+    if (nx_gc_backend_ready() && (sig == suspend_sig || sig == restart_sig)) return EINVAL;
     if (sig == suspend_sig) {            /* stop-the-world: ack the suspend */
       static int logged_s = 0;
       if (!logged_s) { logged_s = 1;
