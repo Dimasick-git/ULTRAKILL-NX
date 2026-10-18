@@ -1,0 +1,31 @@
+name: Repackage full release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        default: r1
+        required: true
+      patch_asset:
+        default: ULTRAKILL_NX_r23_update.zip
+        required: true
+      patch_sha256:
+        description: Expected SHA-256 of the update ZIP
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: repackage-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify, merge and publish complete ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_TAG: ${{ inputs.tag }}
+          PACKAGE_PATCH: ${{ inputs.patch_asset }}
+          PACKAGE_PATCH_SHA: ${{ inputs.patch_sha256 }}
+        run: python3 tools/repackage_release.py
