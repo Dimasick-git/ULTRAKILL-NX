@@ -12,3 +12,4 @@ jobs:
       - run: python3 tools/test_gc_bridge.py --cc gcc
       - run: python3 tools/test_log_repeat.py --cc gcc
       - run: python3 tools/test_umbra_guard.py --cc gcc
+      - run: python3 tools/test_salty_bridge.py --cc gcc

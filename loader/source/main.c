@@ -30,6 +30,7 @@
 #include "nx_video.h"
 #include "nx_gc.h"
 #include "nx_cpu.h"
+#include "nx_salty.h"
 #include <dirent.h>
 #include <strings.h>  /* strncasecmp */
 #include "util.h"
@@ -826,6 +827,14 @@ static void nx_apply_performance_profile(void) {
                 output_height * 16 / 9, output_height, config.render_height, config.fsr);
   }
   if (!config.performance_mode) return;
+  if (config.physics_hz) {
+    void *(*resolve)(const char *)=(void *)so_try_find_addr_rx(&il2cpp_mod,"il2cpp_resolve_icall");
+    void (*set_step)(float)=resolve ? resolve("UnityEngine.Time::set_fixedDeltaTime(System.Single)") : NULL;
+    if (set_step) {
+      set_step(1.0f/config.physics_hz);
+      debugPrintf("[perf-profile] experimental physics=%d Hz; wall-clock and timeScale retained\n",config.physics_hz);
+    } else debugPrintf("[perf-profile] physics setter unavailable; project timestep retained\n");
+  }
   const struct { const char *key; int value; } settings[] = {
     { "unity.quality_mip_limit", 1 }, /* half width/height for mipmapped textures */
     { "unity.quality_shadows", 0 },
@@ -870,7 +879,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r28 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r29 (Unity Android / IL2CPP) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;
@@ -911,6 +920,8 @@ int main(int argc, char *argv[]) {
                 nx_resolved_language(),
                 crc < 0 ? "  [config.txt created]" : crc > 0 ? "  [config.txt rewritten]" : "");
   }
+
+  if (config.saltynx) nx_salty_init();
 
   /* Sweep Unity's case-sensitivity probe files: CASESENSITIVETEST<guid> strays
    * from older builds, plus the single hidden scratch the probe is redirected

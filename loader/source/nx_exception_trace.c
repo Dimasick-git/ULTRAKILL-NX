@@ -2,9 +2,19 @@
  * stack is unwound. Never pause another thread or use watchdog dump storage. */
 #include <switch.h>
 #include <stdint.h>
+#include <string.h>
 #include "so_util.h"
 #include "diag_memory.h"
 #include "util.h"
+void nxb_nullcheck_site(const char *file, int line) {
+  static unsigned count;
+  unsigned sample=__atomic_add_fetch(&count,1,__ATOMIC_RELAXED);
+  if (sample>4 && sample!=64 && sample!=1024 && sample!=8192) return;
+  const char *name=file ? file : "?", *p;
+  if ((p=strrchr(name,'/'))) name=p+1;
+  if ((p=strrchr(name,'\\'))) name=p+1;
+  debugPrintf("[nullcheck] sample=%u source=%s:%d\n",sample,name,line);
+}
 void nxb_exception_trace(void) {
   static unsigned count;
   unsigned sample = __atomic_add_fetch(&count, 1, __ATOMIC_RELAXED);

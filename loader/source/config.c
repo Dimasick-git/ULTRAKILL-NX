@@ -23,6 +23,8 @@
   CONFIG_VAR_INT(shader_chunks); \
   CONFIG_VAR_INT(performance_mode); \
   CONFIG_VAR_INT(render_height); \
+  CONFIG_VAR_INT(physics_hz); \
+  CONFIG_VAR_INT(saltynx); \
   CONFIG_VAR_INT(fsr); \
   CONFIG_VAR_FLOAT(fsr_sharpness);
 
@@ -63,6 +65,7 @@ int read_config(const char *file) {
   config.gyro_invert_y = 1;
   config.shader_chunks = 16;
   config.performance_mode = 1;
+  config.saltynx = 1;
   config.render_height = 540;
   config.fsr = 0;
   config.fsr_sharpness = 0.5f;
@@ -111,6 +114,9 @@ int read_config(const char *file) {
     config_needs_rewrite = 1;
   }
   config.fsr = config.fsr ? 1 : 0;
+  if (config.physics_hz && (config.physics_hz < 60 || config.physics_hz > 125)) {
+    config.physics_hz = 0;config_needs_rewrite = 1;
+  }
   if (!(config.fsr_sharpness >= 0.0f && config.fsr_sharpness <= 2.0f)) {
     config.fsr_sharpness = 0.5f;
     config_needs_rewrite = 1;

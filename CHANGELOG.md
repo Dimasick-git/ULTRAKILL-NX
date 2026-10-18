@@ -1,5 +1,16 @@
 # Изменения
 
+## r29 — локальный тест CPU/SaltyNX
+
+- Прямой NX-FPS shared-memory bridge для NRO: реальные FPS/frametime, cap 15–60, optional service.
+- Конфигурация physics_hz=0 (штатно) или 60–125; на тестовой карте 60 Гц и FSR 480p.
+- На карте maxGore снижен с 256 до 64, личные настройки сохранены в резервной копии.
+- Восстановление NULL-коллекций GunControl без создания оружия/дублирования слотов.
+- Точные source sites NullCheck перед штатным исключением вместо вывода только кандидатов стека.
+- Editor/Input/GPU и host telemetry tests PASS; IL2CPP 493 nodes, 0 failed.
+- Прирост FPS и работоспособность моста на устройстве ещё не подтверждены.
+- Публичный релиз пока r28, два прежних проверенных PART ZIP.
+
 ## r28 — переход в Лимбо и диагностика исключений
 
 - По crash report: NULL после Umbra TomeLoader передавался в Tome::getStatus.

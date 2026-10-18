@@ -13,7 +13,11 @@
   выявил native NULL-dereference в Umbra Tome::getStatus, подтверждённый crash report.
 - r28: null-safe guard, host-тест valid/invalid/init NULL, NRO и IL2CPP собраны.
   Новый native callback снимает ограниченные образцы до unwinding NRE.
-- Аппаратная проверка перехода Лимбо с r28 ещё нужна.
+- Пользователь подтвердил: переход Лимбо с r28 не завис. В боях остаются 10–15 FPS.
+- r29: schema/collection invariants реального GunControl проверены в Editor;
+  исходные UI/Input actions и GPU FSR — PASS; 493 C++ nodes, 0 failed.
+- SaltyNX host test: ABI=310, FPS/ticks, optional absence и handheld/docked cap.
+  Реальный IPC/оверлей и новый CPU-профиль ещё требуют проверки на Switch.
 
 ## Последний аппаратный прогон r26
 

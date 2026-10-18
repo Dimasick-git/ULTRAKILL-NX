@@ -2,6 +2,7 @@
 #include <switch.h>
 #include <stdlib.h>
 #include "nx_perf.h"
+#include "nx_salty.h"
 #include "util.h"
 
 static int compare_float(const void *a, const void *b) {
@@ -10,6 +11,7 @@ static int compare_float(const void *a, const void *b) {
 }
 
 void nx_perf_present(uint64_t begin_tick, uint64_t end_tick, unsigned long draws) {
+  nx_salty_present(end_tick);
   static uint64_t previous, start;
   static unsigned count, samples;
   static double waits, draw_sum;

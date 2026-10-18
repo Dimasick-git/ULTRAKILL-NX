@@ -16,6 +16,7 @@ python tools/test_dladdr.py --cc gcc
 python tools/test_gc_bridge.py --cc gcc
 python tools/test_log_repeat.py --cc gcc
 python tools/test_umbra_guard.py --cc gcc
+python tools/test_salty_bridge.py --cc gcc
 ```
 
 CI выполняет эти host-проверки. Изменение Unity дополнительно требует Input System

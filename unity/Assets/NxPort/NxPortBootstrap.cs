@@ -20,6 +20,7 @@ namespace NxPort
             Object.DontDestroyOnLoad(go);
             go.AddComponent<NxGamepad>();
             go.AddComponent<NxVideoManager>();
+            go.AddComponent<NxWeaponSlots>();
             if (NxBridge.ConfigInt("fsr") != 0) go.AddComponent<NxFsr>();
             if (NxBridge.ConfigInt("gyro") != 0) go.AddComponent<NxGyroAim>();
 

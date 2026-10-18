@@ -153,6 +153,8 @@ typedef struct {
   int   shader_chunks; /* bounded decompressed shader cache, 16 x 16 MiB */
   int   performance_mode; /* 60 FPS target, lower texture/lighting quality */
   int   render_height; /* software render resolution; native display stays 720p */
+    int   physics_hz; /* 0 keeps project timestep; 60..125 experimental CPU profile */
+    int   saltynx; /* optional direct NX-FPS shared-memory producer */
   int   fsr; /* experimental spatial EASU+RCAS, requires managed bridge + bundle */
   float fsr_sharpness; /* RCAS attenuation stops: 0 strongest, 2 weakest */
 } Config;

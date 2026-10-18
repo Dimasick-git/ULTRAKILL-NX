@@ -54,6 +54,7 @@ extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-sa
 #include "nx_shader_diag.h"
 #include "nx_log_repeat.h"
 extern void nxb_exception_trace(void);
+extern void nxb_nullcheck_site(const char *, int);
 
 extern int *__errno(void);              // newlib
 
@@ -1060,6 +1061,7 @@ DynLibFunction dynlib_functions[] = {
   // --- мост для C#-слоя ULTRAKILL: [DllImport("nxbridge")] (nx_bridge.c) ---
   { "nxb_gc_bridge_init", (uintptr_t)&nxb_gc_bridge_init },
   { "nxb_exception_trace", (uintptr_t)&nxb_exception_trace },
+  { "nxb_nullcheck_site", (uintptr_t)&nxb_nullcheck_site },
   { "nxb_gc_begin", (uintptr_t)&nxb_gc_begin },
   { "nxb_gc_pause", (uintptr_t)&nxb_gc_pause },
   { "nxb_gc_resume", (uintptr_t)&nxb_gc_resume },
