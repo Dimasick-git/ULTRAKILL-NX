@@ -18,8 +18,8 @@
 
 Скачай **оба обычных ZIP**:
 
-- [ULTRAKILL_NX_r1_1of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_1of2.zip)
-- [ULTRAKILL_NX_r1_2of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_2of2.zip)
+- [ULTRAKILL_NX_r1_1of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_1of2.zip) — **1,67 ГБ**
+- [ULTRAKILL_NX_r1_2of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_2of2.zip) — **1,68 ГБ**
 
 Распакуй содержимое обоих в **одну папку**, согласившись на объединение папок
 `switch`. Порядок не важен. Склейка и дополнительные скрипты не нужны.
