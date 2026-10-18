@@ -14,7 +14,7 @@ public static class NxInputCheck
 
     public static void Run()
     {
-        var pad = InputSystem.AddDevice<Gamepad>("NX mapping test");
+        var pad = NxGamepad.CreatePad();
         try
         {
             var physical = new[] { NxButton.Up, NxButton.Down, NxButton.Left, NxButton.Right,
@@ -50,7 +50,31 @@ public static class NxInputCheck
             InputState.Change(pad, NxGamepad.MapState(default));
             Require(!pad.rightTrigger.isPressed && !pad.leftTrigger.isPressed &&
                 pad.dpad.ReadValue() == Vector2.zero && !pad.startButton.isPressed, "release sticks");
+            // Use the game's actual generated action asset, not a copied test
+            // binding: catches both inherited usage merging and UI path changes.
+            using (var actions = new global::InputActions())
+            {
+                var submit = actions.asset.FindAction("UI/Submit", true);
+                var cancel = actions.asset.FindAction("UI/Cancel", true);
+                actions.asset.devices = new InputDevice[] { pad };
+                submit.Enable(); cancel.Enable();
+                Require(submit.controls.Count == 1 && submit.controls[0] == pad.buttonEast,
+                    "UI Submit must resolve only to physical Switch A");
+                Require(cancel.controls.Count == 1 && cancel.controls[0] == pad.buttonSouth,
+                    "UI Cancel must resolve only to physical Switch B");
+                foreach (var button in new[] { NxButton.A, NxButton.B, NxButton.A | NxButton.B })
+                {
+                    InputState.Change(pad, NxGamepad.MapState(new NxbPad { buttons = (ulong)button }));
+                    Require(submit.IsPressed() == ((button & NxButton.A) != 0), "A submit mismatch");
+                    Require(cancel.IsPressed() == ((button & NxButton.B) != 0), "B cancel mismatch");
+                }
+                InputState.Change(pad, NxGamepad.MapState(default));
+                Require(!submit.IsPressed() && !cancel.IsPressed(), "UI release sticks");
+                Require(pad.buttonEast.displayName == "A" && pad.buttonSouth.displayName == "B",
+                    "Nintendo button labels missing");
+            }
             Debug.Log("[nxinput-test] PASS: 14 digital buttons, both trigger axes, trigger isolation, combinations and release");
+            Debug.Log("[nxinput-test] PASS: original UI action asset, Switch A Submit / B Cancel, labels, simultaneous press and release");
         }
         finally { InputSystem.RemoveDevice(pad); }
     }

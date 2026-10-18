@@ -866,7 +866,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx native-gc-r23 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx switch-ui-r24 (Unity Android / IL2CPP) ===\n");
   {
     u64 program = 0;
     svcGetInfo(&program, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0);

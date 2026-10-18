@@ -55,7 +55,7 @@ python tools/patch_gc_horizon.py path/to/IL2CPP/external/bdwgc/pthread_stop_worl
 
 ## Как проверить
 
-На установленный полный r1 распаковать `ULTRAKILL_NX_r23_update.zip` в корень
+На установленный полный r1 распаковать актуальный `ULTRAKILL_NX_r24_update.zip` в корень
 карты с заменой папки `switch`. NSP, Saves и Preferences менять не нужно.
 В архив включены согласованные NRO, библиотека, offsets и метаданные.
 
@@ -64,6 +64,7 @@ python tools/patch_gc_horizon.py path/to/IL2CPP/external/bdwgc/pthread_stop_worl
 Нужен полный журнал, чтобы сравнить `used/heap` на повторных загрузках.
 При сбое приложить свежий crash report. Issue остаётся открытым до такой проверки.
 
-Перед обновлением сохрани прежние NRO, libil2cpp.so и offsets.ini: это резервная
-копия для отката. Полные ZIP r1 также обновлены до r23; маленький архив позволяет
+Перед обновлением сохрани прежние NRO, libil2cpp.so, offsets.ini и обе копии
+global-metadata.dat: это резервная копия для отката. Полные ZIP r1 также содержат
+этот backend GC (начиная с r23); маленький архив позволяет
 обновить уже установленную игру без повторного скачивания всех данных.

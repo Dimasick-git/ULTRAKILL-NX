@@ -17,14 +17,34 @@ namespace NxPort
 {
     public sealed class NxGamepad : MonoBehaviour
     {
+        const string LayoutName = "NxSwitchGamepad";
+
+        // Keep positional gameplay bindings, but give UI usage bindings Nintendo
+        // semantics. In the game's UI map */{Submit} and */{Cancel} resolve these
+        // usages; exchanging the entire A/B state would also exchange jump/dodge.
+        public static Gamepad CreatePad()
+        {
+            InputSystem.RegisterLayout(@"{
+                ""name"": ""NxSwitchGamepad"", ""extend"": ""Gamepad"",
+                ""displayName"": ""Nintendo Switch"",
+                ""controls"": [
+                    { ""name"": ""buttonSouth"", ""displayName"": ""B"", ""shortDisplayName"": ""B"", ""usages"": [""Cancel""] },
+                    { ""name"": ""buttonEast"", ""displayName"": ""A"", ""shortDisplayName"": ""A"", ""usages"": [""Submit""] },
+                    { ""name"": ""buttonWest"", ""displayName"": ""Y"", ""shortDisplayName"": ""Y"" },
+                    { ""name"": ""buttonNorth"", ""displayName"": ""X"", ""shortDisplayName"": ""X"" }
+                ]
+            }");
+            return (Gamepad)InputSystem.AddDevice(LayoutName, "Nintendo Switch (NxPort)");
+        }
+
         Gamepad _pad;
         NxbPad _state;
 
         void OnEnable()
         {
-            _pad = InputSystem.AddDevice<Gamepad>("Nintendo Switch (NxPort)");
+            _pad = CreatePad();
             InputSystem.onBeforeUpdate += Push;
-            NxBridge.Log("виртуальный Gamepad добавлен: " + _pad.deviceId);
+            NxBridge.Log("виртуальный Gamepad добавлен: " + _pad.deviceId + " UI: A=Submit B=Cancel");
         }
 
         void OnDisable()

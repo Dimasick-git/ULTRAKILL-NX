@@ -14,20 +14,24 @@
 
 ## Скачать
 
-**[Релиз r1](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/tag/r1)** — актуальная сборка **r23**.
+**[Релиз r1](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/tag/r1)** — актуальная сборка **r24**.
 
 Скачай **оба обычных ZIP**:
 
-- [ULTRAKILL_NX_r1_1of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_1of2.zip) — **1,67 ГБ**
-- [ULTRAKILL_NX_r1_2of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_2of2.zip) — **1,68 ГБ**
+- [ULTRAKILL_NX_r1_1of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_1of2.zip)
+- [ULTRAKILL_NX_r1_2of2.zip](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r1_2of2.zip)
 
 Распакуй содержимое обоих в **одну папку**, согласившись на объединение папок
 `switch`. Порядок не важен. Склейка и дополнительные скрипты не нужны.
 Внутри — сборка, HOME-форвардер и инструкция. Размеры и SHA-256 указаны в релизе.
 Кнопка GitHub **Source code** скачивает только исходники порта.
 
-Если r1 уже установлен, достаточно [обновления r23 — 29,2 МБ](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r23_update.zip).
-Полные ZIP выше также содержат r23. В ней возвращён автоматический GC с остановкой
+Если r1 уже установлен, достаточно [обновления r24](https://github.com/Dimasick-git/ULTRAKILL-NX/releases/download/r1/ULTRAKILL_NX_r24_update.zip).
+Полные ZIP выше также содержат r24. В меню **A — подтвердить, B — отменить/назад**,
+по физическим кнопкам Nintendo Switch. Игровые привязки остаются позиционными.
+FSR пока не включён; [точка подключения и план проверки](docs/FSR.md).
+
+Сохранён автоматический GC r23 с остановкой
 потоков Horizon. Исправление вылета при перезапуске ещё требует проверки на консоли;
 [подробности и порядок проверки](docs/GC-r23.md).
 

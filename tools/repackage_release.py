@@ -11,6 +11,9 @@ REPO=os.environ['GITHUB_REPOSITORY']
 TAG=os.environ['PACKAGE_TAG']
 PATCH=os.environ['PACKAGE_PATCH']
 PATCH_SHA=os.environ['PACKAGE_PATCH_SHA'].lower()
+match=re.fullmatch(r'ULTRAKILL_NX_(r\d+)_update\.zip',PATCH)
+if not match:raise ValueError('Expected a versioned ULTRAKILL_NX update ZIP')
+VERSION=match.group(1)
 NAMES=['ULTRAKILL_NX_r1_1of2.zip','ULTRAKILL_NX_r1_2of2.zip']
 WORK=ROOT/'release-work';INPUT=WORK/'input';GAME=WORK/'package';OUT=WORK/'output'
 for p in (INPUT,GAME,OUT):p.mkdir(parents=True,exist_ok=True)
@@ -114,8 +117,9 @@ checksums=OUT/'SHA256SUMS.txt'
 checksums.write_text(''.join(f'{i["sha256"]}  {i["name"]}\n' for i in report))
 gh('release','upload',TAG,str(checksums),str(GAME/'README_RU.txt'),'--repo',REPO,'--clobber')
 
-body=current['body'].replace('сборка **r22**','сборка **r23**')
+body=re.sub(r'сборка \*\*r\d+\*\*','сборка **'+VERSION+'**',current['body'])
 body=body.replace('Полные ZIP ниже остаются r22.','Полные ZIP ниже уже содержат r23; маленький архив нужен только для обновления существующей установки.')
+body=re.sub(r'Полные ZIP ниже уже содержат r\d+;',f'Полные ZIP ниже уже содержат {VERSION};',body)
 body=body.replace('.\n### Скачать','.\n\n### Скачать')
 for item in report:
     body=body.replace(old_assets[item['name']]['digest'].removeprefix('sha256:'),item['sha256'])
@@ -130,7 +134,7 @@ if bullet not in body:body=body.replace('### В этой сборке\n\n','### 
 notes=OUT/'notes.md';notes.write_text(body,encoding='utf-8')
 gh('release','edit',TAG,'--repo',REPO,'--notes-file',str(notes),'--prerelease=false','--latest')
 api(f'git/refs/tags/{TAG}','--method','PATCH','-f','sha='+os.environ['GITHUB_SHA'],'-F','force=true')
-result={'version':'r23','commit':os.environ['GITHUB_SHA'],'archives':report,'nro_sha256':expected['switch/ultrakill/ultrakill_nx.nro']}
-result_path=OUT/'r23-packaging-report.json';result_path.write_text(json.dumps(result,indent=2)+'\n')
+result={'version':VERSION,'commit':os.environ['GITHUB_SHA'],'archives':report,'nro_sha256':expected['switch/ultrakill/ultrakill_nx.nro']}
+result_path=OUT/(VERSION+'-packaging-report.json');result_path.write_text(json.dumps(result,indent=2)+'\n')
 gh('release','upload',TAG,str(result_path),'--repo',REPO,'--clobber')
 print(json.dumps(result),flush=True)
