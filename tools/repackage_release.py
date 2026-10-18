@@ -14,7 +14,7 @@ PATCH_SHA=os.environ['PACKAGE_PATCH_SHA'].lower()
 match=re.fullmatch(r'ULTRAKILL_NX_(r\d+)_update\.zip',PATCH)
 if not match:raise ValueError('Expected a versioned ULTRAKILL_NX update ZIP')
 VERSION=match.group(1)
-NAMES=['ULTRAKILL_NX_r1_1of2.zip','ULTRAKILL_NX_r1_2of2.zip']
+NAMES=['ULTRAKILL-NX_PART_1.zip','ULTRAKILL-NX_PART_2.zip']
 WORK=ROOT/'release-work';INPUT=WORK/'input';GAME=WORK/'package';OUT=WORK/'output'
 for p in (INPUT,GAME,OUT):p.mkdir(parents=True,exist_ok=True)
 
@@ -57,14 +57,15 @@ assert re.fullmatch('[a-f0-9]{64}',PATCH_SHA)
 assert Path(PATCH).name==PATCH and PATCH.endswith('.zip')
 release=api(f'releases/tags/{TAG}')
 old_assets={a['name']:a for a in release['assets']}
-for name in NAMES+[PATCH]:
+INPUT_NAMES=NAMES if all(n in old_assets for n in NAMES) else ['ULTRAKILL_NX_r1_1of2.zip','ULTRAKILL_NX_r1_2of2.zip']
+for name in INPUT_NAMES+[PATCH]:
     gh('release','download',TAG,'--repo',REPO,'--pattern',name,'--dir',str(INPUT))
     expected=PATCH_SHA if name==PATCH else old_assets[name]['digest'].removeprefix('sha256:')
     assert sha(INPUT/name)==expected,name
 print('All downloaded archives match their SHA-256.',flush=True)
 
 groups=[];base={}
-for name in NAMES:
+for name in INPUT_NAMES:
     actual,members=extract_verified(INPUT/name)
     for member,digest in actual.items():
         if member in base:assert base[member]==digest,member
@@ -82,7 +83,7 @@ expected['SHA256SUMS.txt']=sha(GAME/'SHA256SUMS.txt')
 for name in expected.keys()-(groups[0]|groups[1]):groups[0].add(name)
 assert groups[0]|groups[1]==expected.keys()
 assert groups[0]&groups[1]=={'README_RU.txt','SHA256SUMS.txt'}
-for name in NAMES:(INPUT/name).unlink() # own temporary downloads; free space before compression
+for name in INPUT_NAMES:(INPUT/name).unlink() # own temporary downloads; free space before compression
 
 def pack(i):
     path=OUT/NAMES[i]
@@ -115,26 +116,30 @@ for item in report:
     api(f'releases/assets/{assets[item["temporary"]]["id"]}','--method','PATCH','-f','name='+item['name'])
 checksums=OUT/'SHA256SUMS.txt'
 checksums.write_text(''.join(f'{i["sha256"]}  {i["name"]}\n' for i in report))
-gh('release','upload',TAG,str(checksums),str(GAME/'README_RU.txt'),'--repo',REPO,'--clobber')
-
-body=re.sub(r'сборка \*\*r\d+\*\*','сборка **'+VERSION+'**',current['body'])
-body=body.replace('Полные ZIP ниже остаются r22.','Полные ZIP ниже уже содержат r23; маленький архив нужен только для обновления существующей установки.')
-body=re.sub(r'Полные ZIP ниже уже содержат r\d+;',f'Полные ZIP ниже уже содержат {VERSION};',body)
-body=body.replace('.\n### Скачать','.\n\n### Скачать')
-for item in report:
-    body=body.replace(old_assets[item['name']]['digest'].removeprefix('sha256:'),item['sha256'])
-    lines=body.splitlines()
-    for index,line in enumerate(lines):
-        if line.startswith('| [') and item['name'] in line:
-            size=f"{item['bytes']/1e9:.2f}".replace('.',',')
-            lines[index]=line.rsplit('|',2)[0]+f'| {size} ГБ |'
-    body='\n'.join(lines)+'\n'
-bullet='- Автоматический GC с остановкой потоков Horizon и сохранением полного регистрового контекста.\n'
-if bullet not in body:body=body.replace('### В этой сборке\n\n','### В этой сборке\n\n'+bullet)
+body=(ROOT/'docs/RELEASE.md').read_text(encoding='utf-8').replace('{{VERSION}}',VERSION)
+for index,item in enumerate(report,1):
+    body=body.replace('{{SHA'+str(index)+'}}',item['sha256'])
+    body=body.replace('{{BYTES'+str(index)+'}}',str(item['bytes']))
 notes=OUT/'notes.md';notes.write_text(body,encoding='utf-8')
 gh('release','edit',TAG,'--repo',REPO,'--notes-file',str(notes),'--prerelease=false','--latest')
 api(f'git/refs/tags/{TAG}','--method','PATCH','-f','sha='+os.environ['GITHUB_SHA'],'-F','force=true')
 result={'version':VERSION,'commit':os.environ['GITHUB_SHA'],'archives':report,'nro_sha256':expected['switch/ultrakill/ultrakill_nx.nro']}
 result_path=OUT/(VERSION+'-packaging-report.json');result_path.write_text(json.dumps(result,indent=2)+'\n')
-gh('release','upload',TAG,str(result_path),'--repo',REPO,'--clobber')
+# Re-fetch final names and verify BOTH before removing obsolete assets. The
+# original asset inventory is retained in this job's output for diagnosis.
+print('Previous release inventory: '+json.dumps(release),flush=True)
+final=api(f'releases/tags/{TAG}')
+final_assets={a['name']:a for a in final['assets']}
+for item in report:
+    remote=final_assets[item['name']]
+    assert remote['state']=='uploaded' and remote['size']==item['bytes']
+    assert remote['digest']=='sha256:'+item['sha256']
+for name,asset in final_assets.items():
+    if name not in NAMES:api(f'releases/assets/{asset["id"]}','--method','DELETE')
+final=api(f'releases/tags/{TAG}')
+assert {a['name'] for a in final['assets']}==set(NAMES)
+assert not final['prerelease'] and not final['draft']
+if os.environ.get('GITHUB_STEP_SUMMARY'):
+    with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as summary:
+        summary.write('Verified packaging report\n\n```json\n'+json.dumps(result,indent=2)+'\n```\n')
 print(json.dumps(result),flush=True)

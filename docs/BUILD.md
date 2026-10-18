@@ -26,8 +26,9 @@ make -C loader -j4
    Сохранить исходные имена игровых сборок.
 2. Скопировать `unity/Assets/NxPort` и `unity/Assets/NxPortEditor` в проект.
 3. Открыть в Unity 2022.3.29f1 с Android Build Support, NDK и OpenJDK.
-4. Выполнить `NxInputCheck.Export` через `-executeMethod` в batchmode:
-   проверка кнопок через настоящий Input System, затем экспорт Gradle-проекта.
+4. Выполнить `NxFsrBuild.Export` через `-executeMethod` в batchmode:
+   GPU-проба FSR, отдельный Android shader bundle, проверка кнопок через
+   настоящий Input System, затем экспорт Gradle-проекта.
 5. Для backend GC r23 применить `tools/patch_gc_horizon.py` к экспортированному
    `IL2CPP/external/bdwgc/pthread_stop_world.c`. Подробнее: [GC-r23.md](GC-r23.md).
 6. Скомпилировать экспортированный C++ через его `il2cpp.exe --compile-cpp`:
@@ -76,3 +77,13 @@ python tools/test_diag_snapshot.py --cc C:/path/to/gcc.exe
 ```
 
 Тесты на ПК не заменяют проверку уровней на Switch.
+
+FSR bundle из `Build/NxPortAndroid/nx_fsr.bundle` копируется в
+`assets/NxPort/nx_fsr.bundle`. Заголовки AMD включены с лицензиями.
+После C#-изменений заново проверить все managed/video offsets и обе metadata.
+
+Для диагностики повторяющихся исключений перед compile-cpp применить
+`python tools/patch_exception_trace.py path/to/IL2CPP/libil2cpp/vm/Exception.cpp`.
+Патч сохраняет исходник, проверяет якорь и вызывает необязательный callback
+до разворачивания стека. Без callback поведение Android сохраняется.
+Umbra offsets выводятся `unity_syms.py`; NRO проверяет сигнатуру и цели BL.

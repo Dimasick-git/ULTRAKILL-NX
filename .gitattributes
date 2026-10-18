@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.jpg binary
 *.png binary
+
+# Upstream AMD headers remain byte-identical, including their whitespace.
+unity/Assets/NxPort/Fsr/Vendor/*.h -text -whitespace

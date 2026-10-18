@@ -1,0 +1,14 @@
+name: Host checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  native-adapters:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: python3 tools/test_cpu_affinity.py --cc gcc
+      - run: python3 tools/test_dladdr.py --cc gcc
+      - run: python3 tools/test_gc_bridge.py --cc gcc
+      - run: python3 tools/test_log_repeat.py --cc gcc
+      - run: python3 tools/test_umbra_guard.py --cc gcc

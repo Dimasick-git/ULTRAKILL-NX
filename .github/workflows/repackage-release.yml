@@ -6,7 +6,7 @@ on:
         default: r1
         required: true
       patch_asset:
-        default: ULTRAKILL_NX_r24_update.zip
+        default: ULTRAKILL_NX_r28_update.zip
         required: true
       patch_sha256:
         description: Expected SHA-256 of the update ZIP

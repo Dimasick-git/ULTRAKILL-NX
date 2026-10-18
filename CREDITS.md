@@ -7,6 +7,8 @@
 - **Andy Nguyen (TheOfficialFloW), fgsfds** — so-loader и связанная инфраструктура.
 - **nx-hbloader authors** — основа HOME-форвардера.
 - **devkitPro/libnx, Mesa/nouveau, SDL2, libpng, zlib** — платформа и библиотеки.
+- **AMD / GPUOpen, Michal Drobot** — FidelityFX FSR1 и вспомогательные заголовки, MIT.
+- **Boehm GC contributors** — сборщик мусора; оригинальные уведомления сохранены в патче и сборке.
 - **libjpeg-turbo / Independent JPEG Group** — декодирование кадров видео.
 - **AssetRipper / VanityReprised, HLSLcc, UnityPy, FFmpeg** — подготовка данных.
 

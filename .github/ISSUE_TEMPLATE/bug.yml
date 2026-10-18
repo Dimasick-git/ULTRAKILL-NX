@@ -6,14 +6,14 @@ body:
     id: build
     attributes:
       label: Версия сборки
-      placeholder: r1 / r22
+      placeholder: r1 / r27
     validations:
       required: true
   - type: input
     id: hardware
     attributes:
       label: Консоль и окружение
-      description: Модель Switch, Atmosphère, портатив/док, частоты CPU/GPU/RAM.
+      description: Модель Switch, Atmosphère, портатив/док, частоты CPU/GPU/RAM и изменённые тайминги RAM. FSR и render_height.
     validations:
       required: true
   - type: textarea
