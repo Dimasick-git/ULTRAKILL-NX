@@ -12,7 +12,8 @@ typedef struct {
   uintptr_t thread;
   Handle handle;
   int paused;
-  uintptr_t sp, roots[30]; /* x0..x28, x29; live references may exist only in registers */
+  uintptr_t sp;
+  ThreadContext context; /* All GP/NEON registers, including LR and packed pointers. */
 } GcSlot;
 static GcSlot slots[GC_SLOTS];
 static Mutex pause_gate;
@@ -70,15 +71,14 @@ int nxb_gc_pause(uintptr_t thread, uintptr_t *sp) {
     nxb_gc_end(); return EINVAL;
   }
   slot->handle = handle; slot->thread = thread; slot->paused = 1;
-  ThreadContext context;
+  ThreadContext context = {0};
   MemoryInfo memory; u32 page;
   if (R_FAILED(svcGetThreadContext3(&context, handle)) || !context.sp ||
       R_FAILED(svcQueryMemory(&memory, &page, context.sp)) || !(memory.perm & Perm_R) ||
       context.sp < memory.addr || context.sp-memory.addr >= memory.size) {
     nxb_gc_end(); return EINVAL;
   }
-  for (unsigned r = 0; r < 29; ++r) slot->roots[r] = context.cpu_gprs[r].x;
-  slot->roots[29] = context.fp;
+  slot->context = context;
   slot->sp = context.sp;
   *sp = slot->sp;
   return 0;
@@ -96,6 +96,7 @@ int nxb_gc_resume(uintptr_t thread) {
 
 const uintptr_t *nxb_gc_roots(uintptr_t thread, size_t *words) {
   GcSlot *slot = find(thread);
-  *words = slot ? 30 : 0;
-  return slot ? slot->roots : NULL;
+  _Static_assert(sizeof(ThreadContext) % sizeof(uintptr_t) == 0, "GC register context word alignment");
+  *words = slot ? sizeof(ThreadContext)/sizeof(uintptr_t) : 0;
+  return slot ? (const uintptr_t *)&slot->context : NULL;
 }

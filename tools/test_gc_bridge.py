@@ -19,7 +19,7 @@ static void mutexLock(Mutex*m){assert(!m->held);m->held=1;}
 static void mutexUnlock(Mutex*m){assert(m->held);m->held=0;}
 static int mutexTryLock(Mutex*m){if(m->held)return 0;m->held=1;return 1;}
 typedef struct {uint64_t x;} Reg;
-typedef struct {Reg cpu_gprs[29];uint64_t fp,sp;} ThreadContext;
+typedef struct {Reg cpu_gprs[29];uint64_t fp,lr,sp,vector_words[2];} ThreadContext;
 typedef struct {uint64_t addr,size;unsigned perm;} MemoryInfo;
 enum {ThreadActivity_Paused=1,ThreadActivity_Runnable=0,Perm_R=1};
 #define R_FAILED(x) ((x)!=0)
@@ -34,7 +34,8 @@ static int svcSetThreadActivity(Handle h,int state){
 static int svcGetThreadContext3(ThreadContext*c,Handle h){
   assert(paused[h]);if(h==fail_context)return -1;
   for(unsigned i=0;i<29;i++)c->cpu_gprs[i].x=i;
-  c->cpu_gprs[19].x=only_register_root;c->fp=0x100800;c->sp=0x100000;return 0;
+  c->cpu_gprs[19].x=only_register_root;c->fp=0x100800;c->sp=0x100000;
+  c->lr=only_register_root+8;c->vector_words[0]=only_register_root+16;return 0;
 }
 static int svcQueryMemory(MemoryInfo*m,u32*p,uint64_t a){
   if(fail_query)return -1;m->addr=0x100000;m->size=0x1000;m->perm=no_read?0:Perm_R;return 0;
@@ -49,7 +50,8 @@ int main(void){
   assert(!nxb_gc_begin()&&!nx_gc_snapshot_begin());
   assert(!nxb_gc_pause(1,&sp)&&paused[1]&&sp==0x100000);
   const uintptr_t *roots=nxb_gc_roots(1,&words);
-  assert(roots&&words==30&&roots[19]==only_register_root&&roots[29]==0x100800);
+  assert(roots&&words==sizeof(ThreadContext)/sizeof(uintptr_t)&&roots[19]==only_register_root&&roots[29]==0x100800);
+  assert(roots[30]==only_register_root+8&&roots[32]==only_register_root+16);
   /* A duplicate stop reuses the same paused context. */
   assert(!nxb_gc_pause(1,&sp)&&paused[1]);
   assert(!nxb_gc_pause(2,&sp)&&paused[2]);
