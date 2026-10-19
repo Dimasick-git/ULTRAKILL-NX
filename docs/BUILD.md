@@ -91,3 +91,16 @@ Umbra offsets выводятся `unity_syms.py`; NRO проверяет сиг�
 После exception trace применить `python tools/patch_nullcheck_site.py path/to/IL2CPP`.
 Это требует полной перекомпиляции зависимых C++ единиц. Все три runtime-патча
 (GC, exception trace, nullcheck source) применяются после Export, до compile-cpp.
+
+После каждого экспорта применить также патч optional desktop mouse:
+
+```sh
+python tools/patch_mouse_scroll.py path/to/Source/il2cppOutput
+python tools/test_mouse_scroll.py path/to/Source/il2cppOutput/Assembly-CSharp__13.cpp --cc g++
+```
+
+Это адресный guard в GunControl.Update: при Mouse.current == NULL прокрутка
+равна нулю, выполнение продолжается к логике геймпада. Патч проверяет точный
+метод и продолжение, завершается ошибкой при несовпадении экспорта. Другие
+NullCheck сохраняются. Метаданные этого исправления не меняются; смещения
+из нового libil2cpp.sym.so всё равно нужно вывести заново.

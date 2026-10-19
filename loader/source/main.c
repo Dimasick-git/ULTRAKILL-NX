@@ -827,14 +827,10 @@ static void nx_apply_performance_profile(void) {
                 output_height * 16 / 9, output_height, config.render_height, config.fsr);
   }
   if (!config.performance_mode) return;
-  if (config.physics_hz) {
-    void *(*resolve)(const char *)=(void *)so_try_find_addr_rx(&il2cpp_mod,"il2cpp_resolve_icall");
-    void (*set_step)(float)=resolve ? resolve("UnityEngine.Time::set_fixedDeltaTime(System.Single)") : NULL;
-    if (set_step) {
-      set_step(1.0f/config.physics_hz);
-      debugPrintf("[perf-profile] experimental physics=%d Hz; wall-clock and timeScale retained\n",config.physics_hz);
-    } else debugPrintf("[perf-profile] physics setter unavailable; project timestep retained\n");
-  }
+  /* r29's 60 Hz override changed gameplay speed. Always retain the project's
+   * timestep, including when an old config still contains physics_hz 60. */
+  if (config.physics_hz)
+    debugPrintf("[perf-profile] physics_hz override ignored; project timestep retained\n");
   const struct { const char *key; int value; } settings[] = {
     { "unity.quality_mip_limit", 1 }, /* half width/height for mipmapped textures */
     { "unity.quality_shadows", 0 },
@@ -879,7 +875,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r29 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r30 (Unity Android / IL2CPP) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;

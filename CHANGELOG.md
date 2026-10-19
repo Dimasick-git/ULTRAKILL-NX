@@ -1,6 +1,16 @@
 # Изменения
 
-## r29 — локальный тест CPU/SaltyNX
+## r30 — исправление регрессии r29
+
+- Убран override fixedDeltaTime: даже physics_hz 60 в старом конфиге игнорируется.
+- Возвращён профиль FSR 540p → 720p; сохранены управление, GC и Umbra guard.
+- Журнал точно указал на Mouse.current == NULL в GunControl.Update. При отсутствии
+  мыши scroll=0, выполнение продолжается к gamepad-коду. Другие NRE не подавляются.
+- Исправлен IPC-порт SaltyNX: SaltySD вместо InjectServ; запросы передают PID.
+- Сборки NRO/IL2CPP и проверки mouse branch/IPC/telemetry/Umbra пройдены на ПК.
+- Аппаратная проверка FPS и оверлея r30 ожидается; публичные PART пока r28.
+
+## r29 (отозван после аппаратного теста) — локальный тест CPU/SaltyNX
 
 - Прямой NX-FPS shared-memory bridge для NRO: реальные FPS/frametime, cap 15–60, optional service.
 - Конфигурация physics_hz=0 (штатно) или 60–125; на тестовой карте 60 Гц и FSR 480p.

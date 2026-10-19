@@ -9,10 +9,12 @@ static uint64_t previous,window,pacing;
 static unsigned frames,sample_index;
 void nx_salty_init(void) {
   Handle handle=0,remote=0; uint64_t offset=0,size=sizeof(NxSaltyBlock);
-  Result rc=svcConnectToNamedPort(&handle,"InjectServ");
+  /* InjectServ is only a wake-up port: the server immediately closes it.
+   * Shared-memory commands are served on the SaltySD session. */
+  Result rc=svcConnectToNamedPort(&handle,"SaltySD");
   if (R_FAILED(rc)) {debugPrintf("[saltynx] unavailable rc=0x%x; normal presentation retained\n",rc);return;}
   Service service;serviceCreate(&service,handle);
-  rc=serviceDispatch(&service,7,.out_handle_attrs={SfOutHandleAttr_HipcCopy},.out_handles=&remote);
+  rc=serviceDispatch(&service,7,.in_send_pid=true,.out_handle_attrs={SfOutHandleAttr_HipcCopy},.out_handles=&remote);
   if (R_SUCCEEDED(rc)) {
     shmemLoadRemote(&memory,remote,0x1000,Perm_Rw);
     rc=shmemMap(&memory);
@@ -22,7 +24,7 @@ void nx_salty_init(void) {
         uint32_t magic;memcpy(&magic,base+n,4);
         if (magic==0x465053 && base[n+9]) {rc=MAKERESULT(Module_Libnx,1);break;}
       }
-      if (R_SUCCEEDED(rc)) rc=serviceDispatchInOut(&service,6,size,offset);
+      if (R_SUCCEEDED(rc)) rc=serviceDispatchInOut(&service,6,size,offset,.in_send_pid=true);
       if (R_SUCCEEDED(rc) && offset<=0x1000-size && !(offset&3)) {
         block=(volatile NxSaltyBlock *)(base+offset);
         memset((void *)block,0,sizeof(*block));
