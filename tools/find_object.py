@@ -7,7 +7,6 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
 import UnityPy  # noqa: E402
 
 folder, cab = Path(sys.argv[1]), sys.argv[2].lower()

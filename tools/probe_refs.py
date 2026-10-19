@@ -12,8 +12,12 @@ import collections
 import sys
 from pathlib import Path
 
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
-import UnityPy  # noqa: E402
+try:
+    import UnityPy
+except ImportError as exc:
+    raise SystemExit(
+        "UnityPy не найден. Установите UnityPy или добавьте его в PYTHONPATH."
+    ) from exc
 
 data = Path(sys.argv[1])
 bundle = sys.argv[2] if len(sys.argv) > 2 else "campaign_scenes_level1-1.bundle"

@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Dimasick-git/ULTRAKILL-NX/releases">Релизы</a> ·
+  <a href="https://store.steampowered.com/app/1229490/ULTRAKILL/">Оригинал в Steam</a> ·
   <a href="docs/INSTALL_RU.txt">Установка</a> ·
   <a href="docs/BUILD.md">Сборка</a> ·
   <a href="docs/ARCHITECTURE.md">Архитектура</a> ·
@@ -195,6 +196,6 @@ make -C loader -j4
 - **[Ryazhenka-helper-01 / Zeropaxy](https://github.com/Ryazhenka-helper-01)** — тестирование, скриншоты и видео.
 - Благодарности авторам загрузчика, nx-hbloader, devkitPro/libnx, Mesa/nouveau, SDL2, libjpeg-turbo, Boehm GC и AMD FSR1 перечислены в [CREDITS.md](CREDITS.md).
 
-ULTRAKILL создан Arsi “Hakita” Patala и New Blood Interactive. Этот проект не связан с Nintendo, New Blood Interactive или авторами оригинальной игры. Не распространяйте оригинальные игровые данные и поддерживайте официальную версию ULTRAKILL.
+ULTRAKILL создан Arsi “Hakita” Patala и New Blood Interactive. [Официальная версия ULTRAKILL в Steam](https://store.steampowered.com/app/1229490/ULTRAKILL/) — источник оригинальной игры, из которой подготавливаются данные для порта. Этот проект не связан с Nintendo, New Blood Interactive или авторами оригинальной игры. Не распространяйте оригинальные игровые данные и поддерживайте официальную версию ULTRAKILL.
 
 Лицензия загрузчика: [LICENSE.loader](LICENSE.loader). Лицензии сторонних компонентов и отдельные условия использования указаны в [CREDITS.md](CREDITS.md).

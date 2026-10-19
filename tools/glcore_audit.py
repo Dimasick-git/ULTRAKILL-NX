@@ -12,7 +12,6 @@ import re
 import struct
 import sys
 
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
 import UnityPy  # noqa: E402
 from UnityPy.helpers import CompressionHelper  # noqa: E402
 

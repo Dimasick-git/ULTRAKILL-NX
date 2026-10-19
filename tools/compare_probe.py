@@ -11,7 +11,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
 import UnityPy  # noqa: E402
 import lean_tt  # noqa: E402
 import ushader  # noqa: E402

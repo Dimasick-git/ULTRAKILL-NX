@@ -20,3 +20,15 @@ prod.keys
 *.so
 *.exe
 *.log
+*.dmp
+*.dump
+*.core
+*.trace
+*.prof
+*.pdb
+*.sym
+*.pyc
+*.gcda
+*.gcno
+.DS_Store
+Thumbs.db

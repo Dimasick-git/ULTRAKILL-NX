@@ -12,15 +12,21 @@ import argparse
 import collections
 import gc
 import json
+import os
 import sys
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
 ap.add_argument("dir")
 ap.add_argument("-o", "--out", default="scan.json")
-ap.add_argument("--pylib", default=r"C:\Users\dimas\uk-tools\pylib")
+ap.add_argument(
+    "--pylib",
+    default=os.environ.get("UNITYPY_PATH"),
+    help="каталог с UnityPy; по умолчанию используется установленный пакет",
+)
 a = ap.parse_args()
-sys.path.insert(0, a.pylib)
+if a.pylib:
+    sys.path.insert(0, a.pylib)
 import UnityPy  # noqa: E402
 
 TEXFMT = {}

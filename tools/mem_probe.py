@@ -13,7 +13,6 @@ import ctypes.wintypes
 import gc
 import sys
 
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
 import UnityPy  # noqa: E402
 
 

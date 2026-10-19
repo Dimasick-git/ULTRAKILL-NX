@@ -32,7 +32,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, r"C:\Users\dimas\uk-tools\pylib")
 import lz4.block  # noqa: E402
 import glsl_es  # noqa: E402
 import lean_tt  # noqa: E402
