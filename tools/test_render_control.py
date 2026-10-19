@@ -31,6 +31,9 @@ int main(void){
  assert(live->upscaler==0x80 && live->depth==0); // unsupported options not falsely applied
  nxb_fsr_applied(960,540,1280,720,1);assert(!live->applied);
  nxb_fsr_applied(640,360,1280,720,1);assert(live->applied==1 && shared->scale_percent==50);
+ shared->sharpness=.8f;live->seq=10;
+ assert(nx_render_sharpness()==.7f); // adjacent getters retain the latched revision
+ assert(nx_render_height()==360 && nx_render_sharpness()==.8f);
  live->scale=15;live->fsr=0;live->seq=2;
  assert(nx_render_height()==180 && !nx_render_filter() && live->scale==25);
  nxb_fsr_applied(320,180,1280,720,0);assert(live->applied==2 && !shared->enabled);

@@ -76,8 +76,11 @@ static void poll(void) {
               seq,percent,height,filter,(double)stops);
 }
 int nx_render_height(void){poll();return height;}
-int nx_render_filter(void){poll();return filter;}
-float nx_render_sharpness(void){poll();return sharpness;}
+/* NxFsr reads height, then sharpness/filter on the same Unity thread. Latch
+ * once at the first getter so a concurrent overlay publication cannot mix
+ * revisions across those three P/Invoke calls. */
+int nx_render_filter(void){defaults();return filter;}
+float nx_render_sharpness(void){defaults();return sharpness;}
 void nxb_fsr_applied(int w,int h,int ow,int oh,int active) {
   if(!shared)return;
   shared->in_width=w;shared->in_height=h;shared->out_width=ow;shared->out_height=oh;
