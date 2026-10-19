@@ -67,9 +67,12 @@ int main(void){
  assert(nxb_touch(&touch) && touch.down && touch.id==0 && touch.x==1280 && touch.y==720);
  incoming.count=2;incoming.touches[1]=incoming.touches[0];incoming.touches[0]=(Contact){7,50,90};
  assert(nxb_touch(&touch) && touch.id==0);
- incoming.count=1;assert(nxb_touch(&touch) && !touch.down);
- assert(nxb_touch(&touch) && touch.down && touch.id==7);
- incoming.count=0;assert(nxb_touch(&touch) && !touch.down);assert(!nxb_touch(NULL));
+ incoming.count=1;assert(nxb_touch(&touch) && !touch.down && touch.id==0 && touch.x==1280 && touch.y==720);
+ assert(nxb_touch(&touch) && touch.down && touch.id==7 && touch.x==50 && touch.y==90);
+ incoming.touches[0]=(Contact){7,620,430};
+ assert(nxb_touch(&touch) && touch.down && touch.x==620 && touch.y==430);
+ incoming.count=0;assert(nxb_touch(&touch) && !touch.down && touch.id==7 && touch.x==620 && touch.y==430);
+ assert(nxb_touch(&touch) && !touch.down && touch.x==620 && touch.y==430);assert(!nxb_touch(NULL));
 
  config.gyro=1;config.render_height=540;config.fsr=1;config.gyro_sens=2;
  Config before=config;

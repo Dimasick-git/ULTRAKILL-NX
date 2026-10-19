@@ -162,10 +162,14 @@ int nxb_version(void) { return NXB_VERSION; }
 int nxb_touch_ui_active;
 int nxb_touch(NxbTouch *out) {
   static uint32_t finger;
+  static float last_x, last_y;
   static int held;
   if (!out) return 0;
   nxb_touch_ui_active = 1; /* Managed UI owns taps: no legacy double injection. */
   memset(out, 0, sizeof *out);
+  /* HID has no contact coordinates after lift. UI hit-testing still needs
+   * the last primary position for pointer-up/click, not a jump to (0,0). */
+  out->id=finger; out->x=last_x; out->y=last_y;
   HidTouchScreenState state;
   if (hidGetTouchScreenStates(&state, 1) <= 0 || !state.count) {
     held = 0; return 1;
@@ -174,7 +178,7 @@ int nxb_touch(NxbTouch *out) {
     if (held && state.touches[i].finger_id != finger) continue;
     finger = state.touches[i].finger_id; held = 1;
     out->down=1; out->id=finger;
-    out->x=state.touches[i].x; out->y=state.touches[i].y;
+    out->x=last_x=state.touches[i].x; out->y=last_y=state.touches[i].y;
     return 1;
   }
   /* Release the primary before handing ownership to another finger. */
