@@ -27,4 +27,4 @@ body:
     id: logs
     attributes:
       label: Журнал и скриншоты
-      description: Перетащи debug.log из switch/ultrakill и свежий отчёт из atmosphere/crash_reports, если он есть.
+      description: Приложи switch/ultrakill/debug.log, SaltySD/saltynx.log и свежий файл из atmosphere/crash_reports, если он есть. Логи нужно скопировать с microSD после закрытия игры и до следующего запуска.
