@@ -16,3 +16,4 @@ jobs:
       - run: python3 tools/test_salty_session.py --cc gcc
       - run: python3 tools/test_render_control.py --cc gcc
       - run: python3 tools/test_loading_boost.py --cc gcc
+      - run: python3 tools/test_release_paths.py

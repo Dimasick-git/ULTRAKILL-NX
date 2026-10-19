@@ -31,6 +31,21 @@ def safe_name(name):
     if name.startswith('/') or '..' in name.split('/') or '\\' in name:
         raise ValueError('Unsafe ZIP member: '+name)
     return name
+
+def keep_patch_member(name):
+    safe_name(name)
+    if name.startswith('switch/ultrakill/'):
+        return not name.startswith('switch/ultrakill/il2cpp/')
+    if name in {
+        'atmosphere/contents/0000000000534C56/exefs.nsp',
+        'atmosphere/contents/0000000000534C56/toolbox.json',
+        'atmosphere/contents/0000000000534C56/flags/boot2.flag',
+        'SaltySD/exceptions.txt','SaltySD/flags/log.flag',
+        'SaltySD/saltynx_bootstrap.elf','SaltySD/saltynx_bootstrap32.elf',
+        'SaltySD/saltynx_core.elf','SaltySD/saltynx_core32.elf',
+        'licenses/SaltyNX-UPSTREAM-README.md',
+    }:return True
+    return name.startswith('atmosphere/exefs_patches/SaltyNX_Fixes/') and name.endswith(('.ips','/IDs.txt'))
 def extract_verified(path, expected=None, only_game=False):
     actual={};names=[]
     with zipfile.ZipFile(path) as archive:
@@ -38,7 +53,7 @@ def extract_verified(path, expected=None, only_game=False):
             if item.is_dir():continue
             name=safe_name(item.filename);names.append(name)
             digest=hashlib.sha256()
-            keep=not only_game or (name.startswith('switch/ultrakill/') and not name.startswith('switch/ultrakill/il2cpp/'))
+            keep=not only_game or keep_patch_member(name)
             dest=GAME/name
             if keep:dest.parent.mkdir(parents=True,exist_ok=True)
             out=dest.open('wb') if keep else None
@@ -77,6 +92,9 @@ with zipfile.ZipFile(INPUT/PATCH) as archive:
     patch_manifest=manifest(archive.read('SHA256SUMS.txt'))
 extract_verified(INPUT/PATCH,patch_manifest,only_game=True)
 shutil.copyfile(ROOT/'docs/INSTALL_RU.txt',GAME/'README_RU.txt')
+prefs=GAME/'switch/ultrakill/Preferences/LocalPrefs.json'
+prefs.parent.mkdir(parents=True,exist_ok=True)
+prefs.write_text(json.dumps({'vSync':False,'frameRateLimit':3,'maxGore':64.0},separators=(',',':')),encoding='utf-8')
 expected={p.relative_to(GAME).as_posix():sha(p) for p in GAME.rglob('*') if p.is_file() and p.name!='SHA256SUMS.txt'}
 (GAME/'SHA256SUMS.txt').write_text(''.join(f'{v}  {k}\n' for k,v in sorted(expected.items())),encoding='utf-8')
 expected['SHA256SUMS.txt']=sha(GAME/'SHA256SUMS.txt')
@@ -121,9 +139,9 @@ for index,item in enumerate(report,1):
     body=body.replace('{{SHA'+str(index)+'}}',item['sha256'])
     body=body.replace('{{BYTES'+str(index)+'}}',str(item['bytes']))
 notes=OUT/'notes.md';notes.write_text(body,encoding='utf-8')
-gh('release','edit',TAG,'--repo',REPO,'--notes-file',str(notes),'--prerelease=false','--latest')
+gh('release','edit',TAG,'--repo',REPO,'--title','ULTRAKILL — NX · r1 / '+VERSION,'--notes-file',str(notes),'--prerelease=false','--latest')
 api(f'git/refs/tags/{TAG}','--method','PATCH','-f','sha='+os.environ['GITHUB_SHA'],'-F','force=true')
-result={'version':VERSION,'commit':os.environ['GITHUB_SHA'],'archives':report,'nro_sha256':expected['switch/ultrakill/ultrakill_nx.nro']}
+result={'version':VERSION,'commit':os.environ['GITHUB_SHA'],'archives':report,'nro_sha256':expected['switch/ultrakill/ultrakill_nx.nro'],'manifest_sha256':expected['SHA256SUMS.txt'],'files_count':len(expected)}
 result_path=OUT/(VERSION+'-packaging-report.json');result_path.write_text(json.dumps(result,indent=2)+'\n')
 # Re-fetch final names and verify BOTH before removing obsolete assets. The
 # original asset inventory is retained in this job's output for diagnosis.
