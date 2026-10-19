@@ -7,24 +7,72 @@ static SharedMemory memory;
 static volatile NxSaltyBlock *block;
 static uint64_t previous,window,pacing;
 static unsigned frames,sample_index;
+static bool enabled,foreign_producer,limit_checked;
+static unsigned attempts;
+static uint64_t retry_at;
+
+static bool nx_salty_session_room(void) {
+  u64 raw=0; s64 limit=-1,current=-1;
+  Result rc=svcGetInfo(&raw,InfoType_ResourceLimit,INVALID_HANDLE,0);
+  if (R_FAILED(rc) || !raw) {
+    debugPrintf("[saltynx] session resource handle rc=0x%x\n",rc);return false;
+  }
+  Handle resource=(Handle)raw;
+  Result lr=svcGetResourceLimitLimitValue(&limit,resource,LimitableResource_Sessions);
+  Result cr=svcGetResourceLimitCurrentValue(&current,resource,LimitableResource_Sessions);
+  bool changed=false;
+  debugPrintf("[saltynx] process sessions current=%lld limit=%lld query=0x%x/0x%x\n",
+              (long long)current,(long long)limit,lr,cr);
+  /* Only repair an actually exhausted small process budget; do not alter
+   * memory/thread budgets or guess that every 0x10801 is a session limit. */
+  if (R_SUCCEEDED(lr) && R_SUCCEEDED(cr) && current>=limit && limit>=0 && limit<=128) {
+    rc=svcSetResourceLimitLimitValue(resource,LimitableResource_Sessions,current+8);
+    changed=R_SUCCEEDED(rc);
+    debugPrintf("[saltynx] session budget request %lld -> %lld rc=0x%x\n",
+                (long long)limit,(long long)(current+8),rc);
+  }
+  svcCloseHandle(resource);
+  return changed;
+}
 void nx_salty_init(void) {
+  enabled=true;
+  if (block || foreign_producer || attempts>=30) return;
+  ++attempts;
   Handle handle=0,remote=0; uint64_t offset=0,size=sizeof(NxSaltyBlock);
   /* InjectServ is only a wake-up port: the server immediately closes it.
    * Shared-memory commands are served on the SaltySD session. */
   Result rc=svcConnectToNamedPort(&handle,"SaltySD");
-  if (R_FAILED(rc)) {debugPrintf("[saltynx] unavailable rc=0x%x; normal presentation retained\n",rc);return;}
+  if (rc==0x10801 && !limit_checked) {
+    limit_checked=true;
+    if (nx_salty_session_room()) rc=svcConnectToNamedPort(&handle,"SaltySD");
+  }
+  retry_at=armGetSystemTick()+19200000;
+  if (R_FAILED(rc)) {
+    if (attempts==1 || attempts==5 || attempts==30)
+      debugPrintf("[saltynx] connect SaltySD attempt=%u rc=0x%x; %s\n",attempts,rc,
+                  attempts<30?"retry on present in 1s":"retry budget exhausted");
+    return;
+  }
   Service service;serviceCreate(&service,handle);
+  const char *stage="get shared handle";
   rc=serviceDispatch(&service,7,.in_send_pid=true,.out_handle_attrs={SfOutHandleAttr_HipcCopy},.out_handles=&remote);
   if (R_SUCCEEDED(rc)) {
     shmemLoadRemote(&memory,remote,0x1000,Perm_Rw);
+    stage="map shared memory";
     rc=shmemMap(&memory);
     if (R_SUCCEEDED(rc)) {
       const uint8_t *base=shmemGetAddr(&memory);
       for (unsigned n=0;n+sizeof(NxSaltyBlock)<=0x1000;n+=4) {
         uint32_t magic;memcpy(&magic,base+n,4);
-        if (magic==0x465053 && base[n+9]) {rc=MAKERESULT(Module_Libnx,1);break;}
+        if (magic==0x465053 && base[n+9]) {
+          foreign_producer=true;stage="existing active producer";
+          rc=MAKERESULT(Module_Libnx,1);break;
+        }
       }
-      if (R_SUCCEEDED(rc)) rc=serviceDispatchInOut(&service,6,size,offset,.in_send_pid=true);
+      if (R_SUCCEEDED(rc)) {
+        stage="reserve shared block";
+        rc=serviceDispatchInOut(&service,6,size,offset,.in_send_pid=true);
+      }
       if (R_SUCCEEDED(rc) && offset<=0x1000-size && !(offset&3)) {
         block=(volatile NxSaltyBlock *)(base+offset);
         memset((void *)block,0,sizeof(*block));
@@ -32,15 +80,19 @@ void nx_salty_init(void) {
         block->expected_buffers=-1;
         __atomic_thread_fence(__ATOMIC_RELEASE);
         block->magic=0x465053;block->active=1;
-        debugPrintf("[saltynx] direct NX-FPS bridge mapped offset=%lu ABI=310; API=EGL\n",(unsigned long)offset);
+        debugPrintf("[saltynx] direct NX-FPS bridge mapped offset=%lu ABI=310; API=EGL attempt=%u\n",(unsigned long)offset,attempts);
       } else {if(R_SUCCEEDED(rc))rc=MAKERESULT(Module_Libnx,2);shmemClose(&memory);}
     } else shmemClose(&memory);
   }
   serviceDispatch(&service,0);serviceClose(&service);
-  if (!block) debugPrintf("[saltynx] bridge skipped rc=0x%x (existing producer or IPC/map failure)\n",rc);
+  if (!block && (attempts==1 || attempts==5 || attempts==30 || foreign_producer))
+    debugPrintf("[saltynx] bridge stage=%s rc=0x%x attempt=%u\n",stage,rc,attempts);
 }
 void nx_salty_present(uint64_t tick) {
-  if (!block) return;
+  if (!block) {
+    if (enabled && !foreign_producer && attempts<30 && tick>=retry_at) nx_salty_init();
+    return;
+  }
   block->magic=0x465053;block->active=1;block->api=2;
   if (previous && tick>previous) {
     uint64_t delta=tick-previous;

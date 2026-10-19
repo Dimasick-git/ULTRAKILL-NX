@@ -875,7 +875,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r30 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r31 (Unity Android / IL2CPP) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;

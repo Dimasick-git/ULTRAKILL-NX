@@ -54,3 +54,14 @@ Gfx и два Job.Worker используют разрешённую маску 
 - FPS в бою пока не измерен на r30. Повторный выпуск PART делать после проверки.
 - Host: tools/test_salty_session.py --cc gcc; реальная scroll-ветка проверяется
   tools/test_mouse_scroll.py с Assembly-CSharp__13.cpp из локального экспорта.
+
+
+### Проверка r31 / SaltyNX 2.1.3
+
+Полностью перезагрузить Switch в Atmosphere после замены sysmodule, затем
+запустить игру с HOME. В новом SaltySD/saltynx.log проверить версию 2.1.3.
+В boot r31 проверить connect attempt, sessions current/limit и stage/result.
+Успех подтверждается mapped ABI=310 и реальными FPS/frametime в оверлее.
+Проверить лимиты 30/60 и обычное управление; повторить запуск игры.
+Если подключения нет, сохранить оба свежих журнала. Исчезновение ошибок мыши
+подтверждено r30, но это не является подтверждением работы SaltyNX.

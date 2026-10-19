@@ -8,11 +8,16 @@ def main():
     code=(root/'loader/source/nx_salty.c').read_text();code=code[code.index('void nx_salty_present('):]
     pre=r'''
 #include <assert.h>
+#include <stdbool.h>
 #include <string.h>
 static volatile NxSaltyBlock *block;
 static uint64_t previous,window,pacing,clock_now,slept;
 static unsigned frames,sample_index;
 static int docked;
+static bool enabled,foreign_producer;
+static unsigned attempts;
+static uint64_t retry_at;
+void nx_salty_init(void){++attempts;}
 #define AppletOperationMode_Console 1
 static int appletGetOperationMode(void){return docked;}
 static uint64_t armGetSystemTick(void){return clock_now;}
