@@ -14,3 +14,5 @@ jobs:
       - run: python3 tools/test_umbra_guard.py --cc gcc
       - run: python3 tools/test_salty_bridge.py --cc gcc
       - run: python3 tools/test_salty_session.py --cc gcc
+      - run: python3 tools/test_render_control.py --cc gcc
+      - run: python3 tools/test_loading_boost.py --cc gcc

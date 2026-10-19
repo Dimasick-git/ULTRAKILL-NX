@@ -48,5 +48,7 @@ int   nxb_motion(NxbMotion *out);
 int   nxb_config_int(const char *key);
 float nxb_config_float(const char *key);
 void  nxb_log(const char *msg);
+void nxb_loading(int active);
+void nxb_fsr_applied(int width,int height,int output_width,int output_height,int active);
 
 #endif

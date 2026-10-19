@@ -25,6 +25,7 @@
   CONFIG_VAR_INT(render_height); \
   CONFIG_VAR_INT(physics_hz); \
   CONFIG_VAR_INT(saltynx); \
+  CONFIG_VAR_INT(loading_boost); \
   CONFIG_VAR_INT(fsr); \
   CONFIG_VAR_FLOAT(fsr_sharpness);
 
@@ -66,6 +67,7 @@ int read_config(const char *file) {
   config.shader_chunks = 16;
   config.performance_mode = 1;
   config.saltynx = 1;
+  config.loading_boost = 1;
   config.render_height = 540;
   config.fsr = 0;
   config.fsr_sharpness = 0.5f;
@@ -103,8 +105,7 @@ int read_config(const char *file) {
     config.shader_chunks = 16;
     config_needs_rewrite = 1;
   }
-  if (config.render_height != 360 && config.render_height != 480 && config.render_height != 540 &&
-      config.render_height != 720) {
+  if (config.render_height < 180 || config.render_height > 720) {
     config.render_height = 540;
     config_needs_rewrite = 1;
   }

@@ -31,6 +31,7 @@
 #include "nx_gc.h"
 #include "nx_cpu.h"
 #include "nx_salty.h"
+#include "nx_loading.h"
 #include <dirent.h>
 #include <strings.h>  /* strncasecmp */
 #include "util.h"
@@ -875,7 +876,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r31 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r32 (Unity Android / IL2CPP) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;
@@ -918,6 +919,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (config.saltynx) nx_salty_init();
+  nx_loading_init();
 
   /* Sweep Unity's case-sensitivity probe files: CASESENSITIVETEST<guid> strays
    * from older builds, plus the single hidden scratch the probe is redirected

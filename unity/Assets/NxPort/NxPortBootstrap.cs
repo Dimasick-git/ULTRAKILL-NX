@@ -19,6 +19,7 @@ namespace NxPort
             go.hideFlags = HideFlags.HideAndDontSave;   // смена сцены его не уничтожит
             Object.DontDestroyOnLoad(go);
             go.AddComponent<NxGamepad>();
+            go.AddComponent<NxLoadingBoost>();
             go.AddComponent<NxVideoManager>();
             go.AddComponent<NxWeaponSlots>();
             if (NxBridge.ConfigInt("fsr") != 0) go.AddComponent<NxFsr>();

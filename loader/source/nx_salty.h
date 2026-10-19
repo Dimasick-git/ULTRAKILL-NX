@@ -18,5 +18,6 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(NxSaltyBlock)==310,"SaltyNX 2.1.x ABI");
 _Static_assert(offsetof(NxSaltyBlock,average)==5,"packed average");
 _Static_assert(offsetof(NxSaltyBlock,frame)==165,"packed frame");
+_Static_assert(offsetof(NxSaltyBlock,refresh)==159,"Status Monitor refresh ABI");
 void nx_salty_init(void);
 void nx_salty_present(uint64_t tick);

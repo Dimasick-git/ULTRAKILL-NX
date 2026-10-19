@@ -34,8 +34,8 @@ int main(void) {
  for(unsigned i=0;i<10;++i)assert(data.ticks[i]==320000);
  data.locked=30;pacing=0;clock_now=100000000;nx_salty_present(clock_now);
  clock_now+=320000;nx_salty_present(clock_now);assert(slept>16666000 && slept<16668000);
- data.locked=120;slept=0;clock_now+=320000;nx_salty_present(clock_now);assert(!slept);
- docked=1;data.locked=0;data.locked_docked=20;pacing=0;
+ data.locked=120;slept=0;clock_now+=320000;nx_salty_present(clock_now);assert(data.locked==60); clock_now+=160000;nx_salty_present(clock_now);assert(slept);
+ docked=1;slept=0;data.locked=0;data.locked_docked=20;pacing=0;
  clock_now+=320000;nx_salty_present(clock_now);clock_now+=320000;nx_salty_present(clock_now);
  assert(slept>33332000 && slept<33335000);
  return 0;
@@ -45,5 +45,5 @@ int main(void) {
         c=Path(tmp)/'test.c';exe=Path(tmp)/'test.exe';c.write_text(header+pre+code+test)
         subprocess.run([args.cc,'-std=c11','-O2','-Wall','-Wextra',str(c),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True)
-    print('PASS: 310-byte ABI, exact 60 FPS/frametimes, optional absence, handheld/docked pacing and unsupported cap')
+    print('PASS: 310-byte ABI, exact 60 FPS/frametimes, optional absence, handheld/docked pacing and caps above 60 clamped to 60')
 if __name__=='__main__':main()

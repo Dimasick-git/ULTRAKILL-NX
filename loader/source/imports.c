@@ -1072,6 +1072,8 @@ DynLibFunction dynlib_functions[] = {
   { "nxb_motion", (uintptr_t)&nxb_motion },
   { "nxb_config_int", (uintptr_t)&nxb_config_int },
   { "nxb_config_float", (uintptr_t)&nxb_config_float },
+  { "nxb_loading", (uintptr_t)&nxb_loading },
+  { "nxb_fsr_applied", (uintptr_t)&nxb_fsr_applied },
   { "nxb_log", (uintptr_t)&nxb_log },
   { "nxb_video_open", (uintptr_t)&nxb_video_open },
   { "nxb_video_close", (uintptr_t)&nxb_video_close },

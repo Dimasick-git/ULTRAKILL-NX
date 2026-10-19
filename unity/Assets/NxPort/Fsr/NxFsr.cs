@@ -24,6 +24,8 @@ namespace NxPort
         bool presented;
         string pendingFailure;
         bool failed;
+        float nextSettings, sharpness;
+        bool filter;
 
         public static void SetConstants(Material target, int iw, int ih, int ow, int oh, float sharpness)
         {
@@ -39,7 +41,9 @@ namespace NxPort
         void OnEnable()
         {
             height = NxBridge.ConfigInt("render_height");
-            if (height != 360 && height != 480 && height != 540) height = 540;
+            height = Mathf.Clamp(height, 180, 720);
+            sharpness = NxBridge.ConfigFloat("fsr_sharpness");
+            filter = NxBridge.ConfigInt("fsr_enabled") != 0;
             SceneManager.sceneLoaded += SceneLoaded;
             Camera.onPostRender += Rendered;
             try
@@ -65,6 +69,18 @@ namespace NxPort
         {
             if (failed || !material) return;
             if (pendingFailure != null) { Fallback(pendingFailure); return; }
+            if (Time.unscaledTime >= nextSettings)
+            {
+                nextSettings = Time.unscaledTime + 0.25f;
+                int requested = Mathf.Clamp(NxBridge.ConfigInt("render_height"), 180, 720);
+                float requestedSharpness = NxBridge.ConfigFloat("fsr_sharpness");
+                bool requestedFilter = NxBridge.ConfigInt("fsr_enabled") != 0;
+                if (requested != height || requestedSharpness != sharpness || requestedFilter != filter)
+                {
+                    height = requested; sharpness = requestedSharpness; filter = requestedFilter;
+                    ReleaseTargets(); nextSearch = 0;
+                }
+            }
             if (virtualCamera && displayCamera)
             {
                 if (!virtualCamera.enabled || !virtualCamera.gameObject.activeInHierarchy)
@@ -94,7 +110,7 @@ namespace NxPort
         {
             ReleaseTargets();
             int ow = Screen.width, oh = Screen.height;
-            if (ow < 1280 || oh < 720 || height >= oh)
+            if (ow < 1280 || oh < 720 || height > oh)
                 throw new InvalidOperationException("native 720p output required before enabling FSR");
             if (QualitySettings.activeColorSpace != ColorSpace.Gamma)
                 throw new InvalidOperationException("this integration requires the game's Gamma color space");
@@ -104,11 +120,11 @@ namespace NxPort
             // SetupRTs uses this field for all world, depth, normals and HUD RTs.
             post.downscaleResolution = height;
             low = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default)
-                { name = "NX FSR input", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                { name = "NX FSR input", filterMode = filter ? FilterMode.Point : FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
             upscaled = new RenderTexture(ow, oh, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default)
                 { name = "NX FSR EASU", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
             if (!low.Create() || !upscaled.Create()) throw new InvalidOperationException("FSR RT allocation failed");
-            SetConstants(material, width, height, ow, oh, NxBridge.ConfigFloat("fsr_sharpness"));
+            SetConstants(material, width, height, ow, oh, sharpness);
             virtualCamera.targetTexture = low;
             var output = new GameObject("NX FSR display") { hideFlags = HideFlags.HideAndDontSave };
             output.transform.SetParent(transform, false);
@@ -119,12 +135,14 @@ namespace NxPort
             displayCamera.allowHDR = false; displayCamera.allowMSAA = false;
             displayCamera.useOcclusionCulling = false;
             commands = new CommandBuffer { name = "NX FSR1 EASU + RCAS" };
+            if (filter) {
             commands.BeginSample("NX FSR1 EASU");
             commands.Blit(low, upscaled, material, 0);
             commands.EndSample("NX FSR1 EASU");
             commands.BeginSample("NX FSR1 RCAS");
             commands.Blit(upscaled, BuiltinRenderTextureType.CameraTarget, material, 1);
             commands.EndSample("NX FSR1 RCAS");
+            } else commands.Blit(low, BuiltinRenderTextureType.CameraTarget);
             displayCamera.AddCommandBuffer(CameraEvent.AfterEverything, commands);
             NxBridge.Log($"[fsr] active EASU+RCAS {width}x{height}->{ow}x{oh} format=ARGB32 HUD=in-input");
         }
@@ -140,6 +158,7 @@ namespace NxPort
                 presented = true;
                 NxBridge.Log($"[fsr] first output frame={inputFrame} input={low.width}x{low.height} output={upscaled.width}x{upscaled.height}");
             }
+            NxBridge.FsrApplied(low.width, low.height, upscaled.width, upscaled.height, filter);
         }
 
         void Fallback(string reason)

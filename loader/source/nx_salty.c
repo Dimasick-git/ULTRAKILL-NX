@@ -1,6 +1,7 @@
 #include <switch.h>
 #include <string.h>
 #include "nx_salty.h"
+#include "nx_render_control.h"
 #include "util.h"
 
 static SharedMemory memory;
@@ -38,7 +39,7 @@ void nx_salty_init(void) {
   enabled=true;
   if (block || foreign_producer || attempts>=30) return;
   ++attempts;
-  Handle handle=0,remote=0; uint64_t offset=0,size=sizeof(NxSaltyBlock);
+  Handle handle=0,remote=0; uint64_t offset=0,size=312+sizeof(NxFsrShared)+sizeof(NxFsrLive);
   /* InjectServ is only a wake-up port: the server immediately closes it.
    * Shared-memory commands are served on the SaltySD session. */
   Result rc=svcConnectToNamedPort(&handle,"SaltySD");
@@ -80,6 +81,18 @@ void nx_salty_init(void) {
         block->expected_buffers=-1;
         __atomic_thread_fence(__ATOMIC_RELEASE);
         block->magic=0x465053;block->active=1;
+        nx_render_shared_init((void*)(base+offset+312));
+        uint64_t hz=0;
+        Result rr=serviceDispatchOut(&service,10,hz,.in_send_pid=true);
+        debugPrintf("[saltynx] reported display refresh=%lu Hz rc=0x%x\n",(unsigned long)hz,rr);
+        if (R_SUCCEEDED(rr) && hz>60 && appletGetOperationMode()!=AppletOperationMode_Console) {
+          const uint64_t safe_hz=60;
+          Result sr=serviceDispatchIn(&service,11,safe_hz,.in_send_pid=true);
+          debugPrintf("[saltynx] restore handheld display to 60 Hz request rc=0x%x\n",sr);
+          rr=serviceDispatchOut(&service,10,hz,.in_send_pid=true);
+          debugPrintf("[saltynx] verified display refresh=%lu Hz rc=0x%x\n",(unsigned long)hz,rr);
+        }
+        if (R_SUCCEEDED(rr) && hz>=30 && hz<=240) block->refresh=hz;
         debugPrintf("[saltynx] direct NX-FPS bridge mapped offset=%lu ABI=310; API=EGL attempt=%u\n",(unsigned long)offset,attempts);
       } else {if(R_SUCCEEDED(rc))rc=MAKERESULT(Module_Libnx,2);shmemClose(&memory);}
     } else shmemClose(&memory);
@@ -108,6 +121,11 @@ void nx_salty_present(uint64_t tick) {
     frames=0;window=tick;
   }
   unsigned target=appletGetOperationMode()==AppletOperationMode_Console?block->locked_docked:block->locked;
+  if (target>60) {
+    if(appletGetOperationMode()==AppletOperationMode_Console) block->locked_docked=60;
+    else block->locked=60;
+    target=60;
+  }
   if (target>=15 && target<=60) {
     uint64_t period=19200000/target;
     uint64_t now=armGetSystemTick();

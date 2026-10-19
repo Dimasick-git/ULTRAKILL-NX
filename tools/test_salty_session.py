@@ -8,6 +8,7 @@ def main():
     code=(root/'loader/source/nx_salty.c').read_text()
     code=code[code.index('static SharedMemory memory;'):]
     header=(root/'loader/source/nx_salty.h').read_text().replace('#pragma once','')
+    header += (root/'loader/source/nx_render_control.h').read_text().replace('#pragma once','')
     stubs=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -22,7 +23,9 @@ static unsigned char area[4096];
 static int unavailable,map_fail,connects,dispatches,reservations,closes;
 static int limit_sets,resource_closes,deny_set;
 static int64_t session_limit,session_current;
-static uint64_t clock_now;
+static uint64_t clock_now,display_hz;
+static int refresh_gets,refresh_sets,refresh_set_fail;
+void nx_render_shared_init(void* p){assert(p==area+312);}
 #define InfoType_ResourceLimit 1
 #define INVALID_HANDLE 0
 #define LimitableResource_Sessions 4
@@ -54,10 +57,14 @@ static Result dispatch(Service* s,unsigned cmd,Params p) {
 }
 #define serviceDispatch(s,cmd,...) dispatch(s,cmd,(Params){__VA_ARGS__})
 static Result reserve(Service* s,unsigned cmd,uint64_t size,uint64_t* offset,Params p) {
- assert(s->handle==1 && cmd==6 && size==310 && p.in_send_pid);
+ assert(s->handle==1 && cmd==6 && size==464 && p.in_send_pid);
  ++reservations;*offset=0;return 0;
 }
 #define serviceDispatchInOut(s,cmd,in,out,...) reserve(s,cmd,in,&out,(Params){__VA_ARGS__})
+static Result get_refresh(Service* s,int cmd,uint64_t* out,Params p){assert(s->handle==1 && cmd==10 && p.in_send_pid);*out=display_hz;++refresh_gets;return 0;}
+static Result set_refresh(Service* s,int cmd,uint64_t in,Params p){assert(s->handle==1 && cmd==11 && in==60 && p.in_send_pid);++refresh_sets;if(refresh_set_fail)return 77;display_hz=in;return 0;}
+#define serviceDispatchOut(s,cmd,out,...) get_refresh(s,cmd,&out,(Params){__VA_ARGS__})
+#define serviceDispatchIn(s,cmd,in,...) set_refresh(s,cmd,in,(Params){__VA_ARGS__})
 static void shmemLoadRemote(SharedMemory* m,Handle h,unsigned size,int perm) {
  assert(h==2 && size==4096 && perm==3);m->mapped=0;
 }
@@ -70,6 +77,7 @@ static void serviceClose(Service* s) {s->handle=0;}
 static void reset(void) {
  block=0;memset(area,0,sizeof(area));unavailable=map_fail=connects=dispatches=reservations=closes=0;
  enabled=foreign_producer=limit_checked=false;attempts=0;retry_at=0;
+ display_hz=60;refresh_gets=refresh_sets=refresh_set_fail=0;
  session_limit=32;session_current=3;limit_sets=resource_closes=deny_set=0;clock_now=1;
 }
 int main(void) {
@@ -79,6 +87,8 @@ int main(void) {
  reset();map_fail=1;nx_salty_init();assert(!block && closes==1 && !reservations);
  reset();NxSaltyBlock* other=(void*)area;other->magic=0x465053;other->active=1;other->frame=999;
  nx_salty_init();assert(!block && !reservations && other->frame==999 && closes==1);
+ reset();display_hz=80;nx_salty_init();assert(block && block->refresh==60 && refresh_gets==2 && refresh_sets==1);
+ reset();display_hz=80;refresh_set_fail=1;nx_salty_init();assert(block && block->refresh==80 && refresh_sets==1);
  reset();unavailable=0x10801;session_limit=session_current=0;
  nx_salty_init();assert(block && connects==2 && limit_sets==1 && session_limit==8 && resource_closes==1);
  reset();unavailable=0x10801;nx_salty_init();assert(!block && !limit_sets && resource_closes==1);

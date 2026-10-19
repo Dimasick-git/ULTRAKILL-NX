@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "nx_bridge.h"
+#include "nx_render_control.h"
 #include "config.h"
 #include "util.h"
 
@@ -202,13 +203,14 @@ int nxb_config_int(const char *key) {
   if (!strcmp(key, "gyro_invert_y")) return config.gyro_invert_y;
   if (!strcmp(key, "docked_1080p"))  return config.docked_1080p;
   if (!strcmp(key, "fsr"))           return config.fsr;
-  if (!strcmp(key, "render_height")) return config.render_height;
+  if (!strcmp(key, "render_height")) return nx_render_height();
+  if (!strcmp(key, "fsr_enabled")) return nx_render_filter();
   return 0;
 }
 
 float nxb_config_float(const char *key) {
   if (key && !strcmp(key, "gyro_sens")) return config.gyro_sens;
-  if (key && !strcmp(key, "fsr_sharpness")) return config.fsr_sharpness;
+  if (key && !strcmp(key, "fsr_sharpness")) return nx_render_sharpness();
   return 0.0f;
 }
 
