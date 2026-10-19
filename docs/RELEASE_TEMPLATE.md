@@ -26,6 +26,8 @@ FSR-NX не входит в архив. Без оверлея масштаб з�
 
 Host-тесты, сборка r32 и GPU-тест EASU/RCAS пройдены. Новые live-масштаб, refresh и FastLoad требуют проверки на Switch. Полного прохождения нет; в тяжёлых сценах возможны низкий FPS и паузы. Стабильные 60 FPS не заявляются.
 
+**Аппаратная тестовая среда:** {{модель/SoC Switch; HOS и Atmosphère/Ryzhenka; handheld/docked; версия и профиль Ryazha-clk; фактические частоты CPU/GPU/RAM; версии SaltyNX/FSR-NX, если применимо}}. Неизвестные параметры укажи как неизвестные; результаты относятся к записанной конфигурации, а не ко всем консолям. Подробнее: [тестовая среда](TEST_ENVIRONMENT.md).
+
 [Изменения](https://github.com/Dimasick-git/ULTRAKILL-NX/blob/main/CHANGELOG.md) · [Проверки](https://github.com/Dimasick-git/ULTRAKILL-NX/blob/main/docs/TESTING.md) · [Сообщить о баге](https://github.com/Dimasick-git/ULTRAKILL-NX/issues/new/choose)
 
 ### SHA-256

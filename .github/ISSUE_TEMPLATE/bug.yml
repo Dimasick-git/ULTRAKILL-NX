@@ -12,8 +12,8 @@ body:
   - type: input
     id: hardware
     attributes:
-      label: Консоль и окружение
-      description: Модель Switch, Atmosphère, портатив/док, частоты CPU/GPU/RAM и изменённые тайминги RAM. FSR и render_height.
+      label: Консоль и тестовое окружение
+      description: Модель/SoC Switch, HOS, Atmosphère и релиз Ryzhenka; handheld/docked; версия и активный профиль Ryazha-clk, фактические CPU/GPU/RAM clocks и изменённые вольтажи/тайминги (если известны); SaltyNX/FSR-NX; FSR и render_height. Неизвестные данные отметь как неизвестные. См. docs/TEST_ENVIRONMENT.md.
     validations:
       required: true
   - type: textarea
