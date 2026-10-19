@@ -67,6 +67,8 @@ SaltySD/saltynx.log и свежий atmosphere/crash_reports с уровнем �
 все файлы полного комплекта и одинаков в обоих PART. Его проверка проводится
 после распаковки обоих архивов. Каждый PART меньше 2 ГиБ.
 
+Правовые границы исходников и готового релизного комплекта: docs/LEGAL.md.
+
 SaltyNX: https://github.com/masagrator/SaltyNX/releases/tag/2.1.3
 https://github.com/Dimasick-git/ULTRAKILL-NX
 ULTRAKILL — Arsi “Hakita” Patala / New Blood Interactive.

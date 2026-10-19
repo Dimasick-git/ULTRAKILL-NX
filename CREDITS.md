@@ -9,7 +9,7 @@
 
 - **[Arsi “Hakita” Patala](https://twitter.com/HakitaDev) / [New Blood Interactive](https://newblood.games/)** — авторы оригинальной [ULTRAKILL в Steam](https://store.steampowered.com/app/1229490/ULTRAKILL/).
 
-Оригинальные игровые данные, библиотеки и материалы ULTRAKILL не входят в этот репозиторий и не распространяются вместе с портом.
+Исходный репозиторий не содержит оригинальные игровые данные, библиотеки или реверс-инженерный код ULTRAKILL. Готовый релизный комплект может включать необходимые оригинальные файлы игры для запуска; они не покрываются лицензиями исходников порта и сохраняют права своих правообладателей. Подробности — в [правовой информации](docs/LEGAL.md).
 
 ## Загрузчик и Nintendo Switch
 
@@ -41,9 +41,10 @@ This software is based in part on the work of the Independent JPEG Group.
 
 ## Лицензии
 
-- [Лицензия загрузчика](LICENSE.loader)
+- [Лицензия загрузчика](loader/LICENSE.md)
 - [Лицензия forwarder](forwarder/LICENSE.md)
 - [Лицензия AMD FidelityFX FSR 1](unity/Assets/NxPort/Fsr/Vendor/README.md)
+- [Общие границы лицензирования](LICENSE.md)
 
 Лицензии и исходные уведомления сторонних компонентов сохраняются рядом с соответствующими файлами. Лицензии этого репозитория не распространяются на ULTRAKILL, Unity или оригинальные игровые материалы.
 
