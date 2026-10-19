@@ -124,7 +124,7 @@ def verify(path,keys_path):
         romoff,romsize=program.romfs(section)
         def readrom(offset,size): assert offset+size<=romsize;return program.read(section,romoff+offset,size)
         files=romfs_files(readrom);at,size=files['install-manifest.json']
-        manifest=json.loads(readrom(at,size));assert manifest['version']=='r34'
+        manifest=json.loads(readrom(at,size));assert manifest['version']=='r35'
         archive,exesection,(exepos,_,exefiles)=exefs
         for name,expected in manifest['launcher'].items():
             offset,length=exefiles[name]
@@ -146,7 +146,7 @@ def verify(path,keys_path):
         for name,expected in boot['files'].items():
             assert manifest['files']['ultrakill/assets/bin/Data/'+name]['sha256']==expected, 'Boot graph/metadata provenance mismatch'
     with Path(path).open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
-    return {'file':str(Path(path).resolve()),'version':'r34','title_id':f'{TITLE:016X}', 'bytes':Path(path).stat().st_size,'sha256':digest,'payload_files':len(files),'nca_hashes':True,'romfs_ivfc':True,'payload_hashes':True}
+    return {'file':str(Path(path).resolve()),'version':'r35','title_id':f'{TITLE:016X}', 'bytes':Path(path).stat().st_size,'sha256':digest,'payload_files':len(files),'nca_hashes':True,'romfs_ivfc':True,'payload_hashes':True}
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('nsp',type=Path);ap.add_argument('--keys',required=True,type=Path);ap.add_argument('--report',type=Path);a=ap.parse_args()

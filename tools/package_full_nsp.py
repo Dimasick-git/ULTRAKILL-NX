@@ -26,7 +26,7 @@ def main():
     assert all((a.game/n).is_file() for n in required),'Incomplete game layout'
     assert not list((a.game/'assets/bin/Data').rglob('*.split0')), 'Join Unity split assets before building read-only RomFS'
     assert all((a.game/'assets/bin/Data'/name).is_file() for name in ('globalgamemanagers.assets','sharedassets0.assets'))
-    assert b'ultrakill_nx r34' in (a.game/'ultrakill_nx.nro').read_bytes()
+    assert b'ultrakill_nx r35' in (a.game/'ultrakill_nx.nro').read_bytes()
     assert b'nxb_touch' in (a.game/'libil2cpp.so').read_bytes()
     boot=json.loads((a.game/'assets/NxPort/boot-content.json').read_text(encoding='utf-8'))
     assert boot['source']=='ported-game'
@@ -52,9 +52,9 @@ def main():
         if (a.support/name).is_file():stage(a.support/name,rom/'documentation'/name)
     stage(root/'docs/INSTALL_NSP_RU.md',rom/'documentation/INSTALL_NSP_RU.md')
     shutil.copy2(root/'forwarder/hbl.nso',exefs/'main');shutil.copy2(root/'forwarder/hbl.npdm',exefs/'main.npdm')
-    subprocess.run([str(a.nacptool),'--create','ULTRAKILL - NX','Dimasick-git','r34',str(control/'control.nacp')],check=True)
+    subprocess.run([str(a.nacptool),'--create','ULTRAKILL - NX','Dimasick-git','r35',str(control/'control.nacp')],check=True)
     shutil.copy2(root/'forwarder/icon.jpg',control/'icon_AmericanEnglish.dat')
-    manifest={'version':'r34','title_id':'01005CE3B1A40000','storage':'title RomFS; SD saves/config/cache',
+    manifest={'version':'r35','title_id':'01005CE3B1A40000','storage':'title RomFS; SD saves/config/cache',
         'launcher':{'main':digest(exefs/'main')},
         'npdm_policy_sha256':npdm_policy((exefs/'main.npdm').read_bytes()),
         'files':{s.relative_to(rom).as_posix():{'bytes':s.stat().st_size,'sha256':digest(s)} for s in sorted(rom.rglob('*')) if s.is_file()}}

@@ -20,3 +20,4 @@ jobs:
       - run: python3 tools/test_touch_installed.py --cc gcc
       - run: python3 tools/test_unity_splits.py
       - run: python3 tools/test_boot_overlay.py
+      - run: python3 tools/test_fd_lifetime.py --cc gcc

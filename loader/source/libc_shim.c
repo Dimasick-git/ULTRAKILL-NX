@@ -775,11 +775,13 @@ int stat_fake(const char *path, struct bionic_stat *st) {
   return r;
 }
 int fstat_fake(int fd, struct bionic_stat *st) {
+  nx_fd_lock(fd);
   struct stat real; const int r = fstat(fd, &real);
   if (r == 0) {
     convert_stat(&real, st);
     if (!st->st_ino && fd >= 0 && fd < FD_INO_MAX && g_fd_ino[fd]) st->st_ino = g_fd_ino[fd];
   }
+  nx_fd_unlock(fd);
   return r;
 }
 int lstat_fake(const char *path, struct bionic_stat *st) { return stat_fake(path, st); }
@@ -1629,7 +1631,17 @@ size_t fread_fake(void *ptr, size_t size, size_t n, FILE *f) {
 int fputc_fake(int c, FILE *f) { if (is_fake_file(f)) return c; return fputc(c, f); }
 int fputs_fake(const char *s, FILE *f) { if (is_fake_file(f)) { debugPrintf("stdio: %s", s); return 0; } return fputs(s, f); }
 int fflush_fake(FILE *f) { if (is_fake_file(f) || f == NULL) return 0; return fflush(f); }
-int fclose_fake(FILE *f) { if (is_fake_file(f)) return 0; return fclose(f); }
+int fclose_fake(FILE *f) {
+  if (is_fake_file(f)) return 0;
+  int fd=fileno(f);
+  nx_fd_lock(fd);
+  /* Clear before releasing the native fd: open() can reuse its number as
+   * soon as fclose completes, even while this operation lock is still held. */
+  fd_ino_set(fd,NULL);
+  int r=fclose(f);
+  nx_fd_unlock(fd);
+  return r;
+}
 int ferror_fake(FILE *f) { if (is_fake_file(f)) return 0; return ferror(f); }
 int feof_fake(FILE *f) { if (is_fake_file(f)) return 1; return feof(f); }
 int fileno_fake(FILE *f) { if (is_fake_file(f)) return ((const uint8_t *)f - &fake_sF[0][0]) / 0x100; return fileno(f); }
@@ -1709,8 +1721,15 @@ long write_fake(int fd, const void *buf, size_t count) {
 int close_fake(int fd) {
   if (fd == g_watch_fd) { debugPrintf("[io] <<< close watched fd=%d\n", fd); g_watch_fd = -1; }
   if (fakefd_is_fake(fd)) return fakefd_close(fd);
+  /* newlib __get_handle releases its table lock before _lseek_r uses the
+   * returned handle. Closing concurrently can free it in that gap (r32 crash
+   * A78576D2: _lseek_r+0x40, called by z_lseek). Share the operation lock so
+   * close cannot invalidate a handle while read/seek/pread is using it. */
+  nx_fd_lock(fd);
   fd_ino_set(fd, NULL);
-  return close(fd);
+  int r=close(fd);
+  nx_fd_unlock(fd);
+  return r;
 }
 int pipe_fake(int fds[2]) { return fakefd_pipe(fds); }
 int poll_fake(void *fds, unsigned long nfds, int timeout) { (void)fds; (void)nfds; (void)timeout; return 0; }

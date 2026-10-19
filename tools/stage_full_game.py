@@ -77,11 +77,11 @@ def main():
     shutil.copy2(a.nro,a.output/'ultrakill_nx.nro')
     old=(a.base/'offsets.ini').read_text(encoding='utf-8').splitlines()
     lines=[line for line in old if not line.startswith(('il2cpp.','# libil2cpp'))]
-    lines+=[f'# libil2cpp r34 build-id {lib.build_id()}']+[f'{key} = 0x{value:x}' for key,value in sorted(offsets.items())]
+    lines+=[f'# libil2cpp r35 build-id {lib.build_id()}']+[f'{key} = 0x{value:x}' for key,value in sorted(offsets.items())]
     (a.output/'offsets.ini').write_bytes(('\n'.join(lines)+'\n').encode())
-    assert b'ultrakill_nx r34' in a.nro.read_bytes()
+    assert b'ultrakill_nx r35' in a.nro.read_bytes()
     assert b'UnityEngine.Time::set_fixedDeltaTime' not in a.nro.read_bytes()
-    report={'version':'r34','build_id':lib.build_id(),'files':{f.relative_to(a.output).as_posix():{'bytes':f.stat().st_size,'sha256':sha(f)} for f in sorted(a.output.rglob('*')) if f.is_file()}}
+    report={'version':'r35','build_id':lib.build_id(),'files':{f.relative_to(a.output).as_posix():{'bytes':f.stat().st_size,'sha256':sha(f)} for f in sorted(a.output.rglob('*')) if f.is_file()}}
     a.output.with_suffix('.verified.json').write_bytes((json.dumps(report,indent=2)+'\n').encode())
-    print(json.dumps({'version':'r34','build_id':lib.build_id(),'files':len(report['files']),'bytes':sum(f['bytes'] for f in report['files'].values())},indent=2))
+    print(json.dumps({'version':'r35','build_id':lib.build_id(),'files':len(report['files']),'bytes':sum(f['bytes'] for f in report['files'].values())},indent=2))
 if __name__=='__main__':main()

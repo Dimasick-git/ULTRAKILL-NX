@@ -127,15 +127,15 @@ extern int clock_getres_fake(int clk, struct timespec *ts);   /* libc_shim.c */
 int z_pthread_equal(unsigned long a, unsigned long b){ return a==b; }
 int z_gettid(void){ return 1; }
 int z_dup(int fd){
-  /* il2cpp's MemoryMappedFile::Map dup()s the metadata fd; a -1 here sent the
-   * loader down its error path, so global-metadata.dat never mapped and every
-   * managed class (System.Object included) resolved to NULL. Do a real dup;
-   * if fsdev can't, fall back to the same fd -- our mmap shim copies the file
-   * into RAM eagerly at map time, so reusing/closing the fd afterwards is safe. */
+  extern void nx_fd_lock(int fd), nx_fd_unlock(int fd);
+  /* Acquire the source operation lock before newlib looks up its handle.
+   * Never report the source fd as a successful duplicate: its caller owns a
+   * separate close, which would invalidate the original on duplication failure. */
+  nx_fd_lock(fd);
   int n = dup(fd);
   extern void nx_fd_ino_dup(int from, int to);
-  if (n < 0) n = fd;
-  nx_fd_ino_dup(fd, n);
+  if (n >= 0) nx_fd_ino_dup(fd, n);
+  nx_fd_unlock(fd);
   debugPrintf("[io] dup(%d) -> %d\n", fd, n);
   return n;
 }

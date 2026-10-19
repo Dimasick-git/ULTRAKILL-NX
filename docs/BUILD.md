@@ -105,7 +105,7 @@ python tools/test_mouse_scroll.py path/to/Source/il2cppOutput/Assembly-CSharp__1
 NullCheck сохраняются. Метаданные этого исправления не меняются; смещения
 из нового libil2cpp.sym.so всё равно нужно вывести заново.
 
-## Полный установщик NSP (r34)
+## Полный установщик NSP (r35)
 
 Перед экспортом один раз примените `tools/patch_switch_prompts.ps1` к локальной
 `Assets/Plugins/Assembly-CSharp.dll`. Параметры: `-Assembly` — этот DLL,
