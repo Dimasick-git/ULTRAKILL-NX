@@ -546,7 +546,7 @@ static const char *casetest_redirect(const char *path) {
  * literal path does not exist, so a real absolute path is never shadowed.
  *
  * Returns buf on rewrite, or the original pointer when nothing applies. */
-static const char *root_relative_redirect(const char *path, char *buf, size_t sz) {
+static const char *legacy_relative_redirect(const char *path, char *buf, size_t sz) {
   if (!path) return path;
 
   /* «jar:file://<apk>!/assets/...» -- так на Android выглядит
@@ -588,9 +588,11 @@ static const char *root_relative_redirect(const char *path, char *buf, size_t sz
 
     /* "/bin/Data/..." and "/loc/..." are below assets/; "/assets/..." is not. */
     if (kPrefixes[i][1] == 'a')
-      snprintf(buf, sz, "%s%s", game_root(), path);
-    else
-      snprintf(buf, sz, "%s/assets%s", game_root(), path);
+      game_path(buf, sz, path + 1);
+    else {
+      char relative[512];snprintf(relative,sizeof relative,"assets%s",path);
+      game_path(buf, sz, relative);
+    }
 
     struct stat st;
     if (stat(buf, &st) == 0) {
@@ -603,6 +605,14 @@ static const char *root_relative_redirect(const char *path, char *buf, size_t sz
   return path;
 }
 
+static const char *root_relative_redirect(const char *path, char *buf, size_t sz) {
+  char legacy[512];
+  const char *old=legacy_relative_redirect(path,legacy,sizeof legacy);
+  const char *mapped=game_content_redirect(old,buf,sz);
+  if (mapped!=old) return mapped;
+  if (old==legacy) { snprintf(buf,sz,"%s",legacy);return buf; }
+  return path;
+}
 /* External wrapper so other translation units (imports.c's access()) can use the
  * same redirect without duplicating the rules. */
 const char *nx_root_relative(const char *path, char *buf, unsigned long sz) {

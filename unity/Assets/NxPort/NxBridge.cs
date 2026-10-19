@@ -12,6 +12,9 @@ using UnityEngine;
 namespace NxPort
 {
     [StructLayout(LayoutKind.Sequential)]
+    public struct NxbTouch { public uint down, id; public float x, y; }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct NxbPad
     {
         public uint version;
@@ -51,6 +54,8 @@ namespace NxPort
 
         [DllImport(Lib)] static extern int nxb_version();
         [DllImport(Lib)] static extern int nxb_pad(ref NxbPad pad);
+        [DllImport(Lib)] static extern int nxb_touch(ref NxbTouch touch);
+        [DllImport(Lib)] static extern int nxb_config_set(string key, float value);
         [DllImport(Lib)] static extern int nxb_motion(ref NxbMotion motion);
         [DllImport(Lib)] static extern int nxb_config_int(string key);
         [DllImport(Lib)] static extern float nxb_config_float(string key);
@@ -79,6 +84,8 @@ namespace NxPort
         }
 
         public static bool Pad(ref NxbPad pad) => Available && nxb_pad(ref pad) != 0;
+        public static bool Touch(ref NxbTouch touch) => Available && nxb_touch(ref touch) != 0;
+        public static bool SetConfig(string key, float value) => Available && nxb_config_set(key, value) != 0;
         public static bool Motion(ref NxbMotion m) => Available && nxb_motion(ref m) != 0;
         public static int ConfigInt(string key) => Available ? nxb_config_int(key) : 0;
         public static float ConfigFloat(string key) => Available ? nxb_config_float(key) : 0f;

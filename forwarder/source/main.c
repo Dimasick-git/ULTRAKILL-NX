@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #define DEFAULT_NRO "sdmc:/switch/ultrakill/ultrakill_nx.nro"   /* форвардер ULTRAKILL NX */
+#define INSTALLED_NRO "romfs:/ultrakill/ultrakill_nx.nro"
 
 const char g_noticeText[] =
     "nx-hbloader " VERSION "\0"
@@ -48,7 +49,9 @@ void NX_NORETURN nroEntrypointTrampoline(const ConfigEntry* entries, u64 handle,
 
 void __libnx_initheap(void)
 {
-    static char g_innerheap[0x4000];
+    /* RomFS mounts load directory/file tables. A complete game has more
+     * entries than the original 16 KiB forwarder's allocator could hold. */
+    static char g_innerheap[0x40000];
 
     extern char* fake_heap_start;
     extern char* fake_heap_end;
@@ -371,6 +374,15 @@ void loadNro(void)
     if (R_FAILED(rc))
         diagAbortWithResult(MAKERESULT(Module_HomebrewLoader, 404));
 
+    bool installed = false;
+    if (!strcmp(g_nextNroPath, DEFAULT_NRO) && R_SUCCEEDED(romfsMountFromCurrentProcess("romfs"))) {
+        int probe = open(INSTALLED_NRO, O_RDONLY);
+        if (probe >= 0) {
+            close(probe); installed = true;
+            strcpy(g_nextNroPath, INSTALLED_NRO); strcpy(g_argv, INSTALLED_NRO);
+        } else romfsUnmount("romfs");
+    }
+
     int fd = open(g_nextNroPath, O_RDONLY);
     if (fd < 0)
         diagAbortWithResult(MAKERESULT(Module_HomebrewLoader, 3));
@@ -392,6 +404,7 @@ void loadNro(void)
         diagAbortWithResult(MAKERESULT(Module_HomebrewLoader, 7));
 
     close(fd);
+    if (installed) romfsUnmount("romfs");
     fsdevUnmountAll();
 
     size_t total_size = header->size + header->bss_size;

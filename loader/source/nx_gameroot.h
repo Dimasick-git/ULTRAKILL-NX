@@ -39,6 +39,10 @@ const char *game_apk_path(void);
 /* snprintf "<root>/<rel>" into buf. A leading '/' on rel is tolerated.
  * Returns what snprintf returns. */
 int game_path(char *buf, size_t sz, const char *rel);
+/* Installed NSP: immutable assets in title RomFS, saves/config/cache on SD. */
+int game_installed(void);
+int game_content_relative(const char *rel);
+const char *game_content_redirect(const char *path, char *buf, size_t sz);
 
 #ifdef __cplusplus
 }

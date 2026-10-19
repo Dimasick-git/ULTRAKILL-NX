@@ -40,6 +40,12 @@ int main(void){
  live->scale=200;live->seq=3;assert(nx_render_height()==720 && live->scale==100);
  live->scale=0;live->seq=4;assert(nx_render_height()==720 && revision==3);
  live->scale=50;shared->sharpness=NAN;live->seq=5;assert(nx_render_height()==720 && revision==3);
+ config.render_height=480;config.fsr=1;config.fsr_sharpness=.6f;
+ nx_render_config_changed();
+ live->seq=0x80000006;assert(nx_render_height()==480 && local_request);
+ live->seq=6;assert(nx_render_height()==480 && !local_request && live->scale==67);
+ assert(nx_render_filter()==1 && nx_render_sharpness()==.6f && live->seq==revision);
+ nxb_fsr_applied(853,480,1280,720,1);assert(live->applied==revision);
  return 0;
 }
 '''

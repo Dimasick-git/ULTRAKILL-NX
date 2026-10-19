@@ -156,7 +156,7 @@ int write_config(const char *file) {
   #undef CONFIG_VAR_FLOAT
   #undef CONFIG_VAR_STR
 
-  fclose(f);
-
-  return 0;
+  int failed = ferror(f);
+  if (fclose(f) != 0) failed = 1;
+  return failed ? -1 : 0;
 }

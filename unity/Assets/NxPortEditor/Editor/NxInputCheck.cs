@@ -75,6 +75,27 @@ public static class NxInputCheck
             }
             Debug.Log("[nxinput-test] PASS: 14 digital buttons, both trigger axes, trigger isolation, combinations and release");
             Debug.Log("[nxinput-test] PASS: original UI action asset, Switch A Submit / B Cancel, labels, simultaneous press and release");
+            using (var hintsActions = new global::InputActions())
+            {
+                var manager = (global::InputManager)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(global::InputManager));
+                var player = (global::PlayerInput)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(global::PlayerInput));
+                player.Actions = hintsActions;
+                const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                typeof(global::InputManager).GetField("<InputSource>k__BackingField", flags).SetValue(manager, player);
+                typeof(global::InputManager).GetField("<LastButtonDevice>k__BackingField", flags).SetValue(manager, pad);
+                Require(manager.GetBindingString("Jump") == "B", "game tutorial Jump must show Nintendo B");
+                Require(manager.GetBindingString("Move") == "LS", "game tutorial Move must show stick, not WASD composite");
+                var jump = hintsActions.FindAction("Jump", true);
+                int gamepadBinding = -1;
+                for (int i=0;i<jump.bindings.Count;i++) if (jump.bindings[i].path.Contains("<Gamepad>")) { gamepadBinding=i;break; }
+                Require(gamepadBinding >= 0, "real Jump controller binding exists");
+                jump.ApplyBindingOverride(gamepadBinding, "<Gamepad>/buttonEast");
+                Require(manager.GetBindingString("Jump") == "A", "tutorial hint follows actual controller remap");
+                foreach (var control in new[] { pad.leftShoulder, pad.rightShoulder, pad.leftTrigger, pad.rightTrigger, pad.startButton, pad.selectButton })
+                    Debug.Log("[switch-hints-test] " + control.name + "=" + control.displayName);
+                Require(pad.leftShoulder.displayName=="L" && pad.rightShoulder.displayName=="R" && pad.leftTrigger.displayName=="ZL" && pad.rightTrigger.displayName=="ZR", "Nintendo shoulder/trigger labels");
+                Debug.Log("[switch-hints-test] PASS: real game resolver B jump / LS move, effective user remaps, Nintendo shoulder/trigger labels");
+            }
         }
         finally { InputSystem.RemoveDevice(pad); }
     }

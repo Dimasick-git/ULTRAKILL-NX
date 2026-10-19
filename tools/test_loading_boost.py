@@ -54,6 +54,10 @@ int main(void){
  normal_fail=0;running=true;timer(NULL);assert(!active); // retry while still in focus, without waiting 60s
  finish();assert(!ready);
  config.loading_boost=0;nx_loading_init();assert(!ready);
+ config.loading_boost=1;nx_loading_settings_changed();assert(ready && !active);
+ nxb_loading(1);assert(active);
+ config.loading_boost=0;nx_loading_settings_changed();assert(!active);
+ nxb_loading(1);assert(!active);finish();
  config.loading_boost=1;create_fail=1;nx_loading_init();assert(!ready && !running);
  return 0;
 }

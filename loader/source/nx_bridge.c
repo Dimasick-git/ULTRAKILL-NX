@@ -24,6 +24,9 @@
 
 #include "nx_bridge.h"
 #include "nx_render_control.h"
+#include "nx_gameroot.h"
+#include "nx_loading.h"
+#include <stdio.h>
 #include "config.h"
 #include "util.h"
 
@@ -156,6 +159,28 @@ void nxb_frame(void) {
 
 int nxb_version(void) { return NXB_VERSION; }
 
+int nxb_touch_ui_active;
+int nxb_touch(NxbTouch *out) {
+  static uint32_t finger;
+  static int held;
+  if (!out) return 0;
+  nxb_touch_ui_active = 1; /* Managed UI owns taps: no legacy double injection. */
+  memset(out, 0, sizeof *out);
+  HidTouchScreenState state;
+  if (hidGetTouchScreenStates(&state, 1) <= 0 || !state.count) {
+    held = 0; return 1;
+  }
+  for (unsigned i=0; i<state.count && i<16; ++i) {
+    if (held && state.touches[i].finger_id != finger) continue;
+    finger = state.touches[i].finger_id; held = 1;
+    out->down=1; out->id=finger;
+    out->x=state.touches[i].x; out->y=state.touches[i].y;
+    return 1;
+  }
+  /* Release the primary before handing ownership to another finger. */
+  held=0; return 1;
+}
+
 static float stick(s32 v) {
   float f = (float)v / (float)JOYSTICK_MAX;
   return f > 1.0f ? 1.0f : f < -1.0f ? -1.0f : f;
@@ -205,6 +230,8 @@ int nxb_config_int(const char *key) {
   if (!strcmp(key, "fsr"))           return config.fsr;
   if (!strcmp(key, "render_height")) return nx_render_height();
   if (!strcmp(key, "fsr_enabled")) return nx_render_filter();
+  if (!strcmp(key, "loading_boost")) return config.loading_boost;
+  if (!strcmp(key, "support_reboot")) { extern int nx_support_reboot_required;return nx_support_reboot_required; }
   return 0;
 }
 
@@ -216,4 +243,53 @@ float nxb_config_float(const char *key) {
 
 void nxb_log(const char *msg) {
   if (msg) debugPrintf("[cs] %s\n", msg);
+}
+
+/* Only user-facing runtime options. Never expose heap/physics/clock internals. */
+int nxb_config_set(const char *key, float value) {
+  if (!key || !isfinite(value)) return 0;
+  Config before=config;
+  int render=0;
+  if (!strcmp(key,"gyro_sens") && value>=0.1f && value<=20) config.gyro_sens=value;
+  else if (!strcmp(key,"render_height") && value>=180 && value<=720 && value==(int)value) { config.render_height=(int)value;render=1; }
+  else if (!strcmp(key,"fsr_sharpness") && value>=0 && value<=2) { config.fsr_sharpness=value;render=1; }
+  else if (value==0 || value==1) {
+    int v=(int)value;
+    if (!strcmp(key,"gyro")) config.gyro=v;
+    else if (!strcmp(key,"gyro_invert_x")) config.gyro_invert_x=v;
+    else if (!strcmp(key,"gyro_invert_y")) config.gyro_invert_y=v;
+    else if (!strcmp(key,"loading_boost")) config.loading_boost=v;
+    else if (!strcmp(key,"fsr")) { config.fsr=v;render=1; }
+    else return 0;
+  } else return 0;
+  if (render) {
+    /* Preserve an external FSR-NX request when editing just one option in the
+     * game's panel; do not reset its other fields to stale file defaults. */
+    Config requested=config;
+    config.render_height=nx_render_height();
+    config.fsr=nx_render_filter();
+    config.fsr_sharpness=nx_render_sharpness();
+    if (!strcmp(key,"render_height")) config.render_height=requested.render_height;
+    if (!strcmp(key,"fsr")) config.fsr=requested.fsr;
+    if (!strcmp(key,"fsr_sharpness")) config.fsr_sharpness=requested.fsr_sharpness;
+  }
+  char path[320],temp[336],backup[336];game_path(path,sizeof path,CONFIG_NAME);
+  snprintf(temp,sizeof temp,"%s.tmp",path);
+  snprintf(backup,sizeof backup,"%s.bak",path);
+  int saved=write_config(temp)==0;
+  if (saved && rename(temp,path)!=0) {
+    /* Horizon's RenameFile can reject an existing destination. Keep a
+     * recoverable old config until the complete new file is published. */
+    remove(backup);
+    if (rename(path,backup)==0) {
+      saved=rename(temp,path)==0;
+      if (!saved) rename(backup,path); else remove(backup);
+    } else saved=0;
+  }
+  if (!saved) {
+    config=before;remove(temp);return 0;
+  }
+  if (render) nx_render_config_changed();
+  if (!strcmp(key,"loading_boost")) nx_loading_settings_changed();
+  return 1;
 }

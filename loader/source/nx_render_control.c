@@ -10,6 +10,12 @@ static NxFsrLive *live;
 static int height,filter;
 static float sharpness;
 static uint32_t revision;
+static int local_request;
+
+void nx_render_config_changed(void) {
+  height=config.render_height;filter=config.fsr;sharpness=config.fsr_sharpness;
+  local_request=1;
+}
 
 static int limited_height(int percent) {
   if (percent<25) percent=25;
@@ -53,6 +59,17 @@ void nx_render_shared_init(void *region) {
 }
 static void poll(void) {
   defaults();if(!live)return;
+  if (local_request) {
+    uint32_t old=__atomic_load_n(&live->seq,__ATOMIC_ACQUIRE);
+    if (old&0x80000000u) return;
+    if(!__atomic_compare_exchange_n(&live->seq,&old,old|0x80000000u,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return;
+    live->scale=(height*100+360)/720;live->fsr=filter;
+    shared->sharpness=sharpness;
+    revision=((old+1)&0x7fffffffu);if(!revision)revision=1;
+    local_request=0;
+    __atomic_store_n(&live->seq,revision,__ATOMIC_RELEASE);
+    return;
+  }
   uint32_t seq=__atomic_load_n(&live->seq,__ATOMIC_ACQUIRE);
   if(!seq || (seq&0x80000000u) || seq==revision)return;
   uint16_t percent=__atomic_load_n(&live->scale,__ATOMIC_RELAXED);

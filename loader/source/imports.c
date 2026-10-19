@@ -1069,6 +1069,8 @@ DynLibFunction dynlib_functions[] = {
   { "nxb_gc_end", (uintptr_t)&nxb_gc_end },
   { "nxb_version", (uintptr_t)&nxb_version },
   { "nxb_pad", (uintptr_t)&nxb_pad },
+  { "nxb_touch", (uintptr_t)&nxb_touch },
+  { "nxb_config_set", (uintptr_t)&nxb_config_set },
   { "nxb_motion", (uintptr_t)&nxb_motion },
   { "nxb_config_int", (uintptr_t)&nxb_config_int },
   { "nxb_config_float", (uintptr_t)&nxb_config_float },

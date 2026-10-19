@@ -98,7 +98,8 @@ void *AAssetManager_open(void *a, const char *name, int mode) {
   if (!name || !*name) return NULL;
 
   char path[512];
-  snprintf(path, sizeof path, "%s/assets/%s", game_root(), name);
+  char relative[512];snprintf(relative,sizeof relative,"assets/%s",name);
+  game_path(path,sizeof path,relative);
 
   FILE *f = fopen(path, "rb");
   if (!f) {

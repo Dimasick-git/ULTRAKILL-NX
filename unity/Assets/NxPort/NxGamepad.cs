@@ -32,6 +32,16 @@ namespace NxPort
                     { ""name"": ""buttonEast"", ""displayName"": ""A"", ""shortDisplayName"": ""A"", ""usages"": [""Submit""] },
                     { ""name"": ""buttonWest"", ""displayName"": ""Y"", ""shortDisplayName"": ""Y"" },
                     { ""name"": ""buttonNorth"", ""displayName"": ""X"", ""shortDisplayName"": ""X"" }
+                    ,{ ""name"": ""leftShoulder"", ""displayName"": ""L"", ""shortDisplayName"": ""L"" }
+                    ,{ ""name"": ""rightShoulder"", ""displayName"": ""R"", ""shortDisplayName"": ""R"" }
+                    ,{ ""name"": ""leftTrigger"", ""displayName"": ""ZL"", ""shortDisplayName"": ""ZL"" }
+                    ,{ ""name"": ""rightTrigger"", ""displayName"": ""ZR"", ""shortDisplayName"": ""ZR"" }
+                    ,{ ""name"": ""leftStick"", ""displayName"": ""LS"", ""shortDisplayName"": ""LS"" }
+                    ,{ ""name"": ""rightStick"", ""displayName"": ""RS"", ""shortDisplayName"": ""RS"" }
+                    ,{ ""name"": ""leftStickPress"", ""displayName"": ""LS press"", ""shortDisplayName"": ""LS press"" }
+                    ,{ ""name"": ""rightStickPress"", ""displayName"": ""RS press"", ""shortDisplayName"": ""RS press"" }
+                    ,{ ""name"": ""start"", ""displayName"": ""+"", ""shortDisplayName"": ""+"" }
+                    ,{ ""name"": ""select"", ""displayName"": ""-"", ""shortDisplayName"": ""-"" }
                 ]
             }");
             return (Gamepad)InputSystem.AddDevice(LayoutName, "Nintendo Switch (NxPort)");
@@ -39,6 +49,21 @@ namespace NxPort
 
         Gamepad _pad;
         NxbPad _state;
+        global::InputManager hints;
+        float nextHints;
+        static readonly System.Reflection.FieldInfo HintDevice = typeof(global::InputManager).GetField("<LastButtonDevice>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        void Update()
+        {
+            if (Time.unscaledTime < nextHints) return;
+            nextHints = Time.unscaledTime + 0.5f;
+            if (!hints) hints = FindObjectOfType<global::InputManager>();
+            if (!hints || HintDevice == null || hints.LastButtonDevice == _pad) return;
+            HintDevice.SetValue(hints, _pad);
+            foreach (var text in FindObjectsOfType<global::TextBinds>()) text.SendMessage("OnEnable", SendMessageOptions.DontRequireReceiver);
+            foreach (var text in FindObjectsOfType<global::TextGetControl>()) text.SendMessage("Start", SendMessageOptions.DontRequireReceiver);
+        }
 
         void OnEnable()
         {

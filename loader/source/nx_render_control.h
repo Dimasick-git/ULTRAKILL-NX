@@ -21,4 +21,5 @@ void nx_render_shared_init(void *region);
 int nx_render_height(void);
 int nx_render_filter(void);
 float nx_render_sharpness(void);
+void nx_render_config_changed(void);
 void nxb_fsr_applied(int width,int height,int output_width,int output_height,int active);

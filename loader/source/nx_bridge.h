@@ -37,6 +37,11 @@ typedef struct {
   uint32_t samples;     /* сколько выборок датчика вошло в этот вызов */
 } NxbMotion;
 
+/* Primary UI contact, panel coordinates (1280x720, origin top left). */
+typedef struct { uint32_t down, id; float x, y; } NxbTouch;
+int nxb_touch(NxbTouch *out);
+extern int nxb_touch_ui_active;
+
 /* main.c: один раз после SDL/HID и раз в кадр до nativeRender. */
 void nxb_init(void);
 void nxb_frame(void);
@@ -47,6 +52,7 @@ int   nxb_pad(NxbPad *out);
 int   nxb_motion(NxbMotion *out);
 int   nxb_config_int(const char *key);
 float nxb_config_float(const char *key);
+int nxb_config_set(const char *key, float value);
 void  nxb_log(const char *msg);
 void nxb_loading(int active);
 void nxb_fsr_applied(int width,int height,int output_width,int output_height,int active);

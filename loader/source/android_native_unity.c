@@ -412,6 +412,8 @@ void android_native_input_init(void){
 typedef uint8_t (*inject_fn)(void*,void*,void*,int);
 
 void android_native_feed_hid(inject_fn inject, void *env, void *thiz){
+  extern int nxb_touch_ui_active;
+  if (nxb_touch_ui_active) { g_prev_touch = 0; return; }
   /* Кнопки и стики сюда не идут: их забирает C#-слой через nx_bridge и отдаёт
    * игре виртуальным геймпадом Input System. Здесь только сенсорный экран. */
 

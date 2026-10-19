@@ -16,7 +16,7 @@ static u64 deadline;
 void nxb_loading(int wanted) {
   if (!ready) return;
   mutexLock(&lock);
-  bool next=wanted && appletGetFocusState()==AppletFocusState_InFocus;
+  bool next=wanted && config.loading_boost && appletGetFocusState()==AppletFocusState_InFocus;
   if (next && !active) {
     Result rc=appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
     debugPrintf("[loading-boost] FastLoad request rc=0x%x (CPU boost / GPU throttle)\n",rc);
@@ -54,13 +54,16 @@ static void finish(void) {
   threadWaitForExit(&worker);threadClose(&worker);
   nxb_loading(0);appletUnhook(&focus);ready=false;
 }
-void nx_loading_init(void) {
-  if (!config.loading_boost) return;
+static void ensure_timer(void) {
+  if (ready || !config.loading_boost) return;
   mutexInit(&lock);running=true;
   Result rc=threadCreate(&worker,timer,NULL,stack,sizeof(stack),0x2c,-2);
   if (R_FAILED(rc)) {running=false;debugPrintf("[loading-boost] timer unavailable rc=0x%x; disabled\n",rc);return;}
   rc=threadStart(&worker);
   if (R_FAILED(rc)) {running=false;threadClose(&worker);debugPrintf("[loading-boost] timer start rc=0x%x; disabled\n",rc);return;}
   ready=true;appletHook(&focus,focus_changed,NULL);atexit(finish);
-  nxb_loading(1);
+}
+void nx_loading_init(void) { ensure_timer();nxb_loading(1); }
+void nx_loading_settings_changed(void) {
+  if(config.loading_boost) ensure_timer();else nxb_loading(0);
 }

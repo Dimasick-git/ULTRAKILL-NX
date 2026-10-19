@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <switch.h>
 
 #include "config.h"
 #include "nx_gameroot.h"
@@ -46,6 +47,7 @@ static char g_root_unix[256];
 static char g_log[288];
 static char g_apk[272];
 static int  g_resolved = 0;
+static int g_installed;
 
 /* The marker we look for in step 2. libil2cpp.so is the right choice: it is
  * unambiguously this game's, it is always present (unlike an OBB or assets
@@ -110,6 +112,19 @@ void game_root_init(int argc, char **argv) {
   if (g_resolved) return;
   g_resolved = 1;
 
+  /* The full installer launches its own NRO, never a stale SD copy. Mount the
+   * host NSO's content explicitly: romfsInit() would inspect the NRO instead. */
+  if (argc>0 && argv && argv[0] && !strncmp(argv[0],"romfs:/ultrakill/",17)) {
+    Result rc=romfsMountFromCurrentProcess("nxdata");
+    struct stat st;
+    if (R_FAILED(rc) || stat("nxdata:/ultrakill/offsets.ini",&st)!=0)
+      diagAbortWithResult(MAKERESULT(Module_HomebrewLoader,405));
+    g_installed=1;
+    snprintf(g_root,sizeof g_root,"%s",GAME_HOME);
+    mkdir("sdmc:/switch",0777);mkdir(g_root,0777);
+    derive_from_root();return;
+  }
+
   /* --- 1. argv[0] --------------------------------------------------------- */
   if (argc > 0 && argv && argv[0] && argv[0][0]) {
     char tmp[256];
@@ -154,5 +169,26 @@ int game_path(char *buf, size_t sz, const char *rel) {
   if (!buf || sz == 0) return -1;
   if (!rel || !*rel) return snprintf(buf, sz, "%s", g_root);
   while (*rel == '/') rel++;               /* accept "/x" or "x" alike */
-  return snprintf(buf, sz, "%s/%s", g_root, rel);
+  return snprintf(buf, sz, "%s/%s", g_installed && game_content_relative(rel) ? "nxdata:/ultrakill" : g_root, rel);
+}
+
+int game_installed(void) { ensure();return g_installed; }
+
+int game_content_relative(const char *rel) {
+  if (!rel || strstr(rel,"..") || strchr(rel,'\\')) return 0;
+  return !strcmp(rel,"assets") || !strncmp(rel,"assets/",7) ||
+    !strcmp(rel,"licenses") || !strncmp(rel,"licenses/",9) ||
+    !strcmp(rel,"libunity.so") || !strcmp(rel,"libmain.so") ||
+    !strcmp(rel,"libil2cpp.so") || !strcmp(rel,"offsets.ini");
+}
+
+const char *game_content_redirect(const char *path,char *buf,size_t sz) {
+  if (!game_installed() || !path) return path;
+  const char *rel=path;
+  size_t n=strlen(g_root),u=strlen(g_root_unix);
+  if (!strncmp(rel,g_root,n) && rel[n]=='/') rel+=n+1;
+  else if (!strncmp(rel,g_root_unix,u) && rel[u]=='/') rel+=u+1;
+  else if (*rel=='/' || strchr(rel,':')) return path;
+  if (!game_content_relative(rel)) return path;
+  snprintf(buf,sz,"nxdata:/ultrakill/%s",rel);return buf;
 }

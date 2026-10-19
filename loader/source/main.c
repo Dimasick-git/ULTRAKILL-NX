@@ -614,7 +614,7 @@ static void check_syscalls(void) {
 static int have_rel(const char *rel) {
   char path[768];
   struct stat st;
-  snprintf(path, sizeof path, "%s/%s", DATA_ROOT, rel);
+  game_path(path, sizeof path, rel);
   return stat(path, &st) == 0;
 }
 
@@ -685,7 +685,7 @@ static void check_data(void) {
 /* load a module, advance the .so arena, resolve its imports against the table */
 static int load_module(so_module *mod, const char *name) {
   char path[768];
-  snprintf(path, sizeof path, "%s/%s", DATA_ROOT, name);
+  game_path(path, sizeof path, name);
   if (so_load(mod, path, heap_so_base, heap_so_limit) < 0)
     return -1;
   size_t used = ALIGN_MEM(mod->load_size, 0x1000);
@@ -821,7 +821,9 @@ static void nx_apply_performance_profile(void) {
     const struct { uint32_t numerator, denominator; } refresh = { 60, 1 };
     /* Keep the real NWindow unchanged. Unity's existing software-resolution
      * fallback renders into this smaller target and blits to the native panel. */
-    const int output_height = config.fsr ? 720 : config.render_height;
+    /* r33 keeps the display native even with the filter disabled. NxFsr owns
+     * the low-resolution composition and can switch bilinear/FSR at runtime. */
+    const int output_height = 720;
     ((void (*)(int, int, int, const void *))(ub + resolution))(
         output_height * 16 / 9, output_height, 1, &refresh);
     debugPrintf("[perf-profile] Unity output %dx%d world_height=%d fsr_requested=%d\n",
@@ -876,7 +878,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r32 (Unity Android / IL2CPP) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r33 (touch UI / installed RomFS) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;
@@ -908,6 +910,11 @@ int main(int argc, char *argv[]) {
     extern const char *nx_resolved_language(void);   /* jni_fake.c */
     char cfgpath[320];
     game_path(cfgpath, sizeof cfgpath, CONFIG_NAME);
+    struct stat cfgstat;
+    if (stat(cfgpath,&cfgstat)!=0) {
+      char backup[336];snprintf(backup,sizeof backup,"%s.bak",cfgpath);
+      rename(backup,cfgpath);
+    }
     int crc = read_config(cfgpath);
     if (crc != 0)
       write_config(cfgpath);
@@ -918,6 +925,8 @@ int main(int argc, char *argv[]) {
                 crc < 0 ? "  [config.txt created]" : crc > 0 ? "  [config.txt rewritten]" : "");
   }
 
+  extern void nx_support_prepare(void);
+  nx_support_prepare();
   if (config.saltynx) nx_salty_init();
   nx_loading_init();
 

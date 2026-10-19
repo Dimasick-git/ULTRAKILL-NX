@@ -104,3 +104,35 @@ python tools/test_mouse_scroll.py path/to/Source/il2cppOutput/Assembly-CSharp__1
 метод и продолжение, завершается ошибкой при несовпадении экспорта. Другие
 NullCheck сохраняются. Метаданные этого исправления не меняются; смещения
 из нового libil2cpp.sym.so всё равно нужно вывести заново.
+
+## Полный установщик NSP (r33)
+
+Перед экспортом один раз примените `tools/patch_switch_prompts.ps1` к локальной
+`Assets/Plugins/Assembly-CSharp.dll`. Параметры: `-Assembly` — этот DLL,
+`-InputSystemAssembly` — соседний `Unity.InputSystem.dll`, `-Cecil` —
+`Editor/Data/il2cpp/build/deploy/Mono.Cecil.dll` из установленной Unity.
+Инструмент сохраняет резервную копию, проверяет структуру метода и допускает
+повторный запуск. Изменённый DLL игры в Git не добавляется.
+
+`NxTouchCheck.Export` сначала проверяет реальные UI-кнопки, drag, отмену,
+масштабирование координат, затем запускает проверки FSR/геймпада и экспорт.
+`NxInputCheck` проверяет подсказки на настоящем resolver игры, включая remap.
+После экспорта обязательны обычные патчи GC/exception/nullcheck/mouse и сборка IL2CPP.
+
+`tools/stage_full_game.py` объединяет неизменяемые Addressables/видео из полной
+рабочей сборки со свежими `assets/bin/Data`, библиотеками и NRO. Он требует
+успешные Unity/IL2CPP-журналы, сверяет build-id `.so`/`.sym.so` и выводит
+новый `offsets.ini`. Параметры: `--base`, `--export`, `--nro`, `--output`,
+`--unity-log`, `--il2cpp-log`. Выходной каталог должен быть новым.
+
+`tools/package_full_nsp.py` принимает `--game` (этот каталог), `--support`
+(корень полного комплекта SaltyNX), `--keys` (локальный путь к ключам),
+`--hacbrewpack`, `--nacptool`, `--work` (новый рабочий каталог), `--output`
+(путь итогового NSP). Нужен Python с `cryptography`. Команды генерации читают
+ключи локально; они не копируются в payload и не печатаются в отчёте.
+
+Проверка входит в упаковку: `tools/verify_full_nsp.py` проверяет NCA content IDs,
+хеши PFS0/IVFC, код лаунчера, NPDM-политику и каждый файл RomFS. Для повторной
+проверки: `python tools/verify_full_nsp.py <file.nsp> --keys <local.keys>`.
+Отчёт `.verified.json` относится к конкретному SHA-256 NSP. Это проверка
+контейнера и содержимого на ПК; установка/запуск на Switch проверяются отдельно.

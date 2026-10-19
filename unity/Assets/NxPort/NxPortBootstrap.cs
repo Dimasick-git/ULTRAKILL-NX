@@ -19,11 +19,14 @@ namespace NxPort
             go.hideFlags = HideFlags.HideAndDontSave;   // смена сцены его не уничтожит
             Object.DontDestroyOnLoad(go);
             go.AddComponent<NxGamepad>();
+            go.AddComponent<NxTouch>();
+            go.AddComponent<NxSoftKeyboard>();
+            go.AddComponent<NxPortSettings>();
             go.AddComponent<NxLoadingBoost>();
             go.AddComponent<NxVideoManager>();
             go.AddComponent<NxWeaponSlots>();
-            if (NxBridge.ConfigInt("fsr") != 0) go.AddComponent<NxFsr>();
-            if (NxBridge.ConfigInt("gyro") != 0) go.AddComponent<NxGyroAim>();
+            go.AddComponent<NxFsr>();
+            go.AddComponent<NxGyroAim>();
 
             NxBridge.Log($"слой порта поднят: gyro={NxBridge.ConfigInt("gyro")} " +
                          $"sens={NxBridge.ConfigFloat("gyro_sens"):0.00}");
