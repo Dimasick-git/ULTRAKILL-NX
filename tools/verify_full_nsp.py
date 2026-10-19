@@ -137,7 +137,7 @@ def verify(path,keys_path):
             digest=hashlib.sha256()
             for offset in range(0,size,4*1024*1024):digest.update(readrom(at+offset,min(4*1024*1024,size-offset)))
             assert digest.hexdigest()==record['sha256'],name
-        required={'ultrakill/ultrakill_nx.nro','ultrakill/libil2cpp.so','ultrakill/libunity.so','ultrakill/offsets.ini','ultrakill/assets/bin/Data/Managed/Metadata/global-metadata.dat'}
+        required={'ultrakill/ultrakill_nx.nro','ultrakill/libil2cpp.so','ultrakill/libunity.so','ultrakill/offsets.ini','ultrakill/assets/bin/Data/Managed/Metadata/global-metadata.dat','ultrakill/assets/bin/Data/globalgamemanagers.assets','ultrakill/assets/bin/Data/sharedassets0.assets'}
         assert required<=set(files)
     with Path(path).open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
     return {'file':str(Path(path).resolve()),'version':'r33','title_id':f'{TITLE:016X}', 'bytes':Path(path).stat().st_size,'sha256':digest,'payload_files':len(files),'nca_hashes':True,'romfs_ivfc':True,'payload_hashes':True}

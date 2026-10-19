@@ -24,6 +24,8 @@ def main():
     assert not a.work.exists(),'Use a new, empty work directory'
     required=['ultrakill_nx.nro','libmain.so','libunity.so','libil2cpp.so','offsets.ini','assets/bin/Data/globalgamemanagers','assets/bin/Data/Managed/Metadata/global-metadata.dat','assets/NxPort/nx_fsr.bundle']
     assert all((a.game/n).is_file() for n in required),'Incomplete game layout'
+    assert not list((a.game/'assets/bin/Data').rglob('*.split0')), 'Join Unity split assets before building read-only RomFS'
+    assert all((a.game/'assets/bin/Data'/name).is_file() for name in ('globalgamemanagers.assets','sharedassets0.assets'))
     assert b'ultrakill_nx r33' in (a.game/'ultrakill_nx.nro').read_bytes()
     assert b'nxb_touch' in (a.game/'libil2cpp.so').read_bytes()
     a.work.mkdir(parents=True);rom=a.work/'romfs';exefs=a.work/'exefs';control=a.work/'control'

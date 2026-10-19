@@ -5,6 +5,23 @@ from derive_offsets import Elf,derive_il2cpp,VIDEO_METHODS
 
 def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+def join_unity_splits(data):
+    """RomFS is read-only: complete Unity's split files before installation."""
+    for first in sorted(data.rglob('*.split0')):
+        base=first.with_name(first.name[:-7])
+        parts=sorted(first.parent.glob(base.name+'.split*'),key=lambda p:int(p.name.rsplit('.split',1)[1]))
+        assert [p.name for p in parts]==[base.name+f'.split{i}' for i in range(len(parts))], 'Missing Unity split: '+str(base)
+        header=first.read_bytes()[:48];version=int.from_bytes(header[8:12],'big')
+        assert 22<=version<=64
+        declared=int.from_bytes(header[24:32],'big')
+        assert declared==sum(p.stat().st_size for p in parts), 'Truncated Unity file: '+str(base)
+        temporary=base.with_name(base.name+'.nx-tmp')
+        with temporary.open('wb') as out:
+            for part in parts:
+                with part.open('rb') as source:shutil.copyfileobj(source,out)
+        assert temporary.stat().st_size==declared
+        temporary.replace(base)
+        for part in parts:part.unlink()
 def main():
     p=argparse.ArgumentParser()
     for name in ('base','export','nro','output','unity-log','il2cpp-log'):p.add_argument('--'+name,required=True,type=Path)
@@ -29,6 +46,7 @@ def main():
         try:os.link(src,dst)
         except OSError:shutil.copy2(src,dst)
     shutil.copytree(a.export/'assets/bin/Data',a.output/'assets/bin/Data')
+    join_unity_splits(a.output/'assets/bin/Data')
     for name in ('libmain.so','libunity.so','libil2cpp.so'):shutil.copy2(libs/name,a.output/name)
     shutil.copy2(a.nro,a.output/'ultrakill_nx.nro')
     old=(a.base/'offsets.ini').read_text(encoding='utf-8').splitlines()

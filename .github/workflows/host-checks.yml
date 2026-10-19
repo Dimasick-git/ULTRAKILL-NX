@@ -18,3 +18,4 @@ jobs:
       - run: python3 tools/test_loading_boost.py --cc gcc
       - run: python3 tools/test_release_paths.py
       - run: python3 tools/test_touch_installed.py --cc gcc
+      - run: python3 tools/test_unity_splits.py
