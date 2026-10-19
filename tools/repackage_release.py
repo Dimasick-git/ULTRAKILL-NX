@@ -134,7 +134,7 @@ for item in report:
     api(f'releases/assets/{assets[item["temporary"]]["id"]}','--method','PATCH','-f','name='+item['name'])
 checksums=OUT/'SHA256SUMS.txt'
 checksums.write_text(''.join(f'{i["sha256"]}  {i["name"]}\n' for i in report))
-body=(ROOT/'docs/RELEASE.md').read_text(encoding='utf-8').replace('{{VERSION}}',VERSION)
+body=(ROOT/'docs/RELEASE_TEMPLATE.md').read_text(encoding='utf-8').replace('{{VERSION}}',VERSION)
 for index,item in enumerate(report,1):
     body=body.replace('{{SHA'+str(index)+'}}',item['sha256'])
     body=body.replace('{{BYTES'+str(index)+'}}',str(item['bytes']))
