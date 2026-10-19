@@ -44,6 +44,8 @@ ULTRAKILL — NX переносит Android-сборку Unity/IL2CPP на Ninte
 
 Новые функции r32 — управление масштабом через SaltyNX/FSR-NX, чтение частоты дисплея и FastLoad — ещё проверяются на Switch. Стабильные 60 FPS во всей игре пока **не подтверждены**. См. [проверки](docs/TESTING.md) и [журнал изменений](CHANGELOG.md).
 
+> **Тестовая среда:** аппаратные результаты получены на конкретной конфигурации [Ryzhenka + Ryazha-clk](docs/TEST_ENVIRONMENT.md). Это не типовая или гарантированно воспроизводимая настройка на любой Switch; Ryazha-clk не требуется для запуска порта.
+
 ## Скриншоты
 
 | Игровой процесс | Результат прохождения 0-2 |
@@ -209,6 +211,7 @@ sdmc:/atmosphere/crash_reports/
 - [SaltyNX](docs/SALTYNX.md)
 - [FastLoad](docs/LOADING.md)
 - [Проверки и ограничения](docs/TESTING.md)
+- [Тестовая среда и применимость результатов](docs/TEST_ENVIRONMENT.md)
 - [Память и GC](docs/GC-r23.md)
 - [Шаблон релизных заметок](docs/RELEASE_TEMPLATE.md)
 - [История изменений](CHANGELOG.md)
