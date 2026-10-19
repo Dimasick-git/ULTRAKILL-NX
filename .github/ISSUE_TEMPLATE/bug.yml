@@ -6,7 +6,7 @@ body:
     id: build
     attributes:
       label: Версия сборки
-      placeholder: r1 / r27
+      placeholder: r1 / r32
     validations:
       required: true
   - type: input
