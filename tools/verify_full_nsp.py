@@ -124,7 +124,7 @@ def verify(path,keys_path):
         romoff,romsize=program.romfs(section)
         def readrom(offset,size): assert offset+size<=romsize;return program.read(section,romoff+offset,size)
         files=romfs_files(readrom);at,size=files['install-manifest.json']
-        manifest=json.loads(readrom(at,size));assert manifest['version']=='r33'
+        manifest=json.loads(readrom(at,size));assert manifest['version']=='r34'
         archive,exesection,(exepos,_,exefiles)=exefs
         for name,expected in manifest['launcher'].items():
             offset,length=exefiles[name]
@@ -139,8 +139,14 @@ def verify(path,keys_path):
             assert digest.hexdigest()==record['sha256'],name
         required={'ultrakill/ultrakill_nx.nro','ultrakill/libil2cpp.so','ultrakill/libunity.so','ultrakill/offsets.ini','ultrakill/assets/bin/Data/Managed/Metadata/global-metadata.dat','ultrakill/assets/bin/Data/globalgamemanagers.assets','ultrakill/assets/bin/Data/sharedassets0.assets'}
         assert required<=set(files)
+        at,size=files['ultrakill/assets/NxPort/boot-content.json']
+        boot=json.loads(readrom(at,size));assert boot['source']=='ported-game'
+        from stage_full_game import BOOT_FILES,RUNTIME_FILES
+        assert set(boot['files'])==set(BOOT_FILES+RUNTIME_FILES)
+        for name,expected in boot['files'].items():
+            assert manifest['files']['ultrakill/assets/bin/Data/'+name]['sha256']==expected, 'Boot graph/metadata provenance mismatch'
     with Path(path).open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
-    return {'file':str(Path(path).resolve()),'version':'r33','title_id':f'{TITLE:016X}', 'bytes':Path(path).stat().st_size,'sha256':digest,'payload_files':len(files),'nca_hashes':True,'romfs_ivfc':True,'payload_hashes':True}
+    return {'file':str(Path(path).resolve()),'version':'r34','title_id':f'{TITLE:016X}', 'bytes':Path(path).stat().st_size,'sha256':digest,'payload_files':len(files),'nca_hashes':True,'romfs_ivfc':True,'payload_hashes':True}
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('nsp',type=Path);ap.add_argument('--keys',required=True,type=Path);ap.add_argument('--report',type=Path);a=ap.parse_args()

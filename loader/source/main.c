@@ -878,7 +878,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r33 (touch UI / installed RomFS) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r34 (game boot data / installed RomFS) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;

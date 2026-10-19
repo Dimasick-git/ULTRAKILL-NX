@@ -105,7 +105,7 @@ python tools/test_mouse_scroll.py path/to/Source/il2cppOutput/Assembly-CSharp__1
 NullCheck сохраняются. Метаданные этого исправления не меняются; смещения
 из нового libil2cpp.sym.so всё равно нужно вывести заново.
 
-## Полный установщик NSP (r33)
+## Полный установщик NSP (r34)
 
 Перед экспортом один раз примените `tools/patch_switch_prompts.ps1` к локальной
 `Assets/Plugins/Assembly-CSharp.dll`. Параметры: `-Assembly` — этот DLL,
@@ -120,9 +120,17 @@ NullCheck сохраняются. Метаданные этого исправл
 После экспорта обязательны обычные патчи GC/exception/nullcheck/mouse и сборка IL2CPP.
 
 `tools/stage_full_game.py` объединяет неизменяемые Addressables/видео из полной
-рабочей сборки со свежими `assets/bin/Data`, библиотеками и NRO. Он требует
+рабочей сборки с новыми библиотеками, NRO и метаданными кода. Все стартовые
+сцены, ресурсы и файлы зависимостей из `assets/bin/Data` сохраняются из рабочей
+базы. Из экспорта обновляются только `Managed/Metadata/global-metadata.dat`,
+`ScriptingAssemblies.json` и `RuntimeInitializeOnLoads.json`. Bootstrap редактора —
+технический каркас для компиляции: его `level0` и ресурсы не являются игровыми.
+Подмена ими данных игры приводит к чёрному экрану и пустым ссылкам SceneHelper.
+Инструмент отклоняет базу с такой же стартовой сценой, как у экспорта. Он требует
 успешные Unity/IL2CPP-журналы, сверяет build-id `.so`/`.sym.so` и выводит
-новый `offsets.ini`. Параметры: `--base`, `--export`, `--nro`, `--output`,
+новый `offsets.ini` и `assets/NxPort/boot-content.json` с контрольными суммами
+стартовых данных и метаданных. Упаковщик и проверка NSP сверяют этот манифест.
+Регрессионная проверка: `python tools/test_boot_overlay.py`. Параметры: `--base`, `--export`, `--nro`, `--output`,
 `--unity-log`, `--il2cpp-log`. Выходной каталог должен быть новым.
 
 `tools/package_full_nsp.py` принимает `--game` (этот каталог), `--support`
