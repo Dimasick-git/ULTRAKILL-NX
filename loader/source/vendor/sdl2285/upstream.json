@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/devkitPro/SDL",
+  "commit": "0738d3c9f6993875e2f3dd0e8cc0bb4ae4440b4e",
+  "branch": "switch-sdl-2.28",
+  "files": {
+    "SDL_dataqueue.h": "02f653a61dbd0479748f2a1deaf19e251a93983d28070b5b2bfdd71f1e1c1099",
+    "SDL_internal.h": "f7f25a95bc52ed3bcc07d29e74904d0e7d2fdd97e5d1aa5d38dcce10836d5841",
+    "audio/SDL_audio_c.h": "09495f87ab52a3c65ce3ec2e9b23da8607cc8eecbb9a71f64c90916ed41085e0",
+    "audio/SDL_sysaudio.h": "cf9d8216cbbcc18486d4a36624b6a742be49307efbbde10c8a5f6c076cc5e0ef",
+    "audio/switch/SDL_switchaudio.h": "642bc15117d4ba4399afd3179ac225cc4d08bbe710c972973cd871e5a59e5d31"
+  }
+}

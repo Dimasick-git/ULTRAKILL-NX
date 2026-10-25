@@ -1,16 +1,15 @@
 /* nx_gameroot.c -- resolve the game folder at RUNTIME instead of baking it in.
  *
- * The base ports hardcoded their data root ("sdmc:/switch/zookeeper"), which
- * means the .nro only works from one exact folder name. That is a bad deal for
- * the user: everyone has their own naming habit (papers_please, PapersPlease,
- * papersplease, Papers Please), and picking the wrong one produces a silent
- * failure that looks like a broken build rather than a misplaced folder.
+ * A hardcoded data root means the .nro only works from one exact folder name.
+ * That is a bad deal for the user: everyone has their own naming habit
+ * (ultrakill, ULTRAKILL, ultrakill-nx), and picking the wrong one produces a
+ * silent failure that looks like a broken build rather than a misplaced folder.
  *
  * So: work out where we actually are, and use that.
  *
  * RESOLUTION ORDER
  *   1. argv[0]. hbmenu passes the full path of the .nro it launched, e.g.
- *      "sdmc:/switch/papers_please/papersplease_nx.nro". Take its directory.
+ *      "sdmc:/switch/ultrakill/ultrakill_nx.nro". Take its directory.
  *      This is the normal case and it is exact.
  *
  *   2. Scan sdmc:/switch/<*> for a directory that contains libil2cpp.so.

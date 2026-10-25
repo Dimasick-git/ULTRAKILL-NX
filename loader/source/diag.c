@@ -17,6 +17,7 @@
 #include "so_util.h" /* so_find_module_by_addr for backtrace symbolication */
 #include "diag_memory.h"
 #include "nx_gc.h"
+#include "nx_cpu.h"
 
 /* ------------------------------------------------------------------ tunables */
 #define DIAG_MAX_THREADS   96
@@ -145,6 +146,20 @@ uint32_t diag_find_tid_handle(int tid) {
   return result;
 }
 
+/* Дескриптор потока по имени (профайлер nx_prof.c). Блокировку реестра берёт
+ * до того, как вызывающий кого-либо приостановит. */
+uint32_t diag_find_name_handle(const char *name) {
+  Handle result = 0;
+  if (!name) return 0;
+  mutexLock(&g_reg_lock);
+  for (int i = 0; i < DIAG_MAX_THREADS; ++i) {
+    DiagThread *t = &g_threads[i];
+    if (t->in_use && !strcmp(t->name, name)) { result = t->handle; break; }
+  }
+  mutexUnlock(&g_reg_lock);
+  return result;
+}
+
 void diag_set_name(void *target_pthread, const char *name) {
   if (!name) return;
   DiagThread *t = NULL;
@@ -160,6 +175,7 @@ void diag_set_name(void *target_pthread, const char *name) {
   if (!t) return;
   strncpy(t->name, name, sizeof(t->name) - 1);
   t->name[sizeof(t->name) - 1] = 0;
+    nx_cpu_thread_named(t->handle,name);
 }
 
 void diag_wait_enter(int kind, const void *obj) {
@@ -434,6 +450,22 @@ static void dump_threads(int episode, uint64_t now) {
               "d_spin>0 == alive on futex; d_wait>d_wake == entered a wait it hasn't left)\n");
   /* native backtrace: where each thread is wedged inside libunity/il2cpp/NRO */
   debugPrintf("[wd] --- thread CPU contexts (frame-pointer backtrace) ---\n");
+  ThreadContext collector_context;
+  unsigned gc_phase=0;
+  NxGcLockTrace gc_lock={0};
+  if(nx_gc_snapshot_collector(&collector_context,&gc_phase,&gc_lock)) {
+    char pc[96],lr[96];
+    resolve_addr(pc,sizeof pc,collector_context.pc.x);
+    resolve_addr(lr,sizeof lr,collector_context.lr);
+    debugPrintf("[wd] GC collector phase=%u (1=heap gate,2=pause,3=roots,4=resume) PC=%s LR=%s SP=0x%llx X0=0x%llx X1=0x%llx\n",
+      gc_phase,pc,lr,(unsigned long long)collector_context.sp,
+      (unsigned long long)collector_context.cpu_gprs[0].x,(unsigned long long)collector_context.cpu_gprs[1].x);
+    if(gc_lock.address) {
+      char caller[96];resolve_addr(caller,sizeof caller,gc_lock.caller);
+      debugPrintf("[wd] GC pending mutex=0x%lx owner_handle=0x%x caller=%s\n",
+        (unsigned long)gc_lock.address,gc_lock.owner&~0x40000000u,caller);
+    }
+  }
   for (int i = 0; i < DIAG_MAX_THREADS; i++) {
     if (g_threads[i].in_use) snapshot_thread(&g_threads[i]);
   }

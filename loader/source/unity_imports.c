@@ -1,6 +1,6 @@
 /* unity_imports.c -- supplementary import table for the Unity/IL2CPP engine.
  *
- * libunity/libil2cpp import ~138 symbols cr3's table didn't provide. so_resolve
+ * libunity/libil2cpp import ~138 symbols the base table doesn't provide. so_resolve
  * poisons anything unresolved, so a constructor calling one crashes during
  * init_array. Here we map them: real newlib/libm/EGL/zlib functions, our own
  * ANativeWindow/ALooper/ASensor implementations (android_native_unity.c), and
@@ -122,6 +122,7 @@ int z_pthread_getattr_np(void *thread, void *attr){ (void)thread; (void)attr; re
 
 /* dedicated stubs */
 int z_getpagesize(void){ return 0x1000; }
+extern void nx_exit_fake(int code);   /* imports.c */
 struct timespec;
 extern int clock_getres_fake(int clk, struct timespec *ts);   /* libc_shim.c */
 int z_pthread_equal(unsigned long a, unsigned long b){ return a==b; }
@@ -228,7 +229,7 @@ DynLibFunction unity_dynlib_functions[] = {
   { "eglQueryString", (uintptr_t)&eglQueryString },
   { "eglSurfaceAttrib", (uintptr_t)&eglSurfaceAttrib },
   { "eglSwapInterval", (uintptr_t)&eglSwapInterval },
-  { "exit", (uintptr_t)&exit },
+  { "exit", (uintptr_t)&nx_exit_fake },   /* imports.c: чистый выход через svcExitProcess */
   { "exp", (uintptr_t)&exp },
   { "exp2f", (uintptr_t)&exp2f },
   { "fdopen", (uintptr_t)&fdopen },

@@ -12,11 +12,13 @@
 import argparse
 import shutil
 import subprocess
+import os
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 
 
 def has_shaders(path):
@@ -51,8 +53,8 @@ def main():
             continue
         # дешёвая проверка в дочернем процессе: память родителя не растёт
         r = subprocess.run([sys.executable, "-I", "-c",
-                            "import sys; sys.path.insert(0, r'%s');"
-                            "import port_all; print(int(port_all.has_shaders(sys.argv[1])))" % HERE,
+                            "import sys; sys.path.insert(0, r'%s'); sys.path.insert(0, r'%s');"
+                            "import port_all; print(int(port_all.has_shaders(sys.argv[1])))" % (HERE, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib"))),
                             str(b)], capture_output=True, text=True)
         need = r.stdout.strip().endswith("1")
         if need or a.target == "android":

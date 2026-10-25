@@ -19,14 +19,9 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument("dir")
 ap.add_argument("-o", "--out", default="scan.json")
-ap.add_argument(
-    "--pylib",
-    default=os.environ.get("UNITYPY_PATH"),
-    help="каталог с UnityPy; по умолчанию используется установленный пакет",
-)
+ap.add_argument("--pylib", default=os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 a = ap.parse_args()
-if a.pylib:
-    sys.path.insert(0, a.pylib)
+sys.path.insert(0, a.pylib)
 import UnityPy  # noqa: E402
 
 TEXFMT = {}

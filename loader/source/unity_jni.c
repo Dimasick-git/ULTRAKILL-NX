@@ -1,9 +1,6 @@
-/* unity_jni.c -- real handlers for PAPERS, PLEASE's IMPLEMENT classes.
- * Style/idioms follow cr3_nx's jni_fake.c. See unity_jni.h for how it plugs in.
- *
- * NOT compile-tested (no devkitA64 here). Method names/signatures are the
- * standard Android framework API, so they're concrete; the spots that need
- * checking on hardware are marked CHECK. */
+/* unity_jni.c -- real handlers for the Android framework classes Unity needs.
+ * Style/idioms follow the base loader's jni_fake.c. See unity_jni.h for how it
+ * plugs in. Method names/signatures are the standard Android framework API. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +25,7 @@ struct FakeID { uint32_t tag; char cls[96]; char name[64]; char sig[160]; };
 #define SCREEN_H_DOCKED   1920
 #define REFRESH_HZ        60
 
-static char g_root[192];            /* e.g. /switch/zookeeper                 */
+static char g_root[192];            /* e.g. /switch/ultrakill                 */
 static char g_assets[208];          /* g_root "/assets"                      */
 
 static int  has(const char *s, const char *sub){ return strstr(s,sub)!=NULL; }
@@ -78,10 +75,10 @@ static void asset_path(char *out,size_t n,const char *name){
 }
 
 /* Path handed to *managed* code (persistentDataPath / dataPath via the Context
- * getters below). It must be Unix-rooted ("/switch/zookeeper"): Mono/IL2CPP on
+ * getters below). It must be Unix-rooted ("/switch/ultrakill"): Mono/IL2CPP on
  * Android uses Unix path rules where ":" is NOT a root marker, so a "sdmc:/..."
  * path is treated as *relative* and Path.Combine() concatenates it after a
- * relative asset path -> "assets/bin/Data/sdmc:/switch/zookeeper". newlib then
+ * relative asset path -> "assets/bin/Data/sdmc:/switch/ultrakill". newlib then
  * sees the embedded "sdmc:" mid-path, mis-parses the device, and null-derefs
  * (Data Abort at the devoptab mkdir_r slot, +0x68). Stripping the device prefix
  * fixes this; newlib still resolves the device-less absolute path via the
@@ -466,7 +463,7 @@ void unity_dispatch_void(void *recv, const void *id_, va_list va){ const struct 
 
 /* ========================================================================== */
 void unity_jni_init(const char *data_root){
-  snprintf(g_root,sizeof g_root,"%s",data_root && *data_root ? data_root : "/switch/zookeeper");
+  snprintf(g_root,sizeof g_root,"%s",data_root && *data_root ? data_root : "/switch/" GAME_FOLDER);
   snprintf(g_assets,sizeof g_assets,"%s/assets",g_root);
   prefs_load();
   /* caller (jni_fake.c jni_init) should also intern every UNITY_JNI_CLASSES[]

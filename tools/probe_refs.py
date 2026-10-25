@@ -9,15 +9,12 @@ resources.assets, sharedassets0.assets) и для материалов из ба
 """
 
 import collections
+import os
 import sys
 from pathlib import Path
 
-try:
-    import UnityPy
-except ImportError as exc:
-    raise SystemExit(
-        "UnityPy не найден. Установите UnityPy или добавьте его в PYTHONPATH."
-    ) from exc
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
+import UnityPy  # noqa: E402
 
 data = Path(sys.argv[1])
 bundle = sys.argv[2] if len(sys.argv) > 2 else "campaign_scenes_level1-1.bundle"

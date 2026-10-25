@@ -1,11 +1,11 @@
-/* main.c -- PAPERS, PLEASE Switch wrapper entry point.
+/* main.c -- ULTRAKILL NX: точка входа загрузчика.
  *
- * Retargeted from the Zookeeper DX loader (same Unity minor version, 2022.3.62f2,
- * and portrait like this game). Engine offsets: nx_patch_pp.h / pp_il2cpp.h.
+ * Загрузчик -- из линии so-loader портов Unity-игр (см. CREDITS.md). Адреса
+ * движка и игры -- в offsets.ini (tools/unity_syms.py, tools/derive_offsets.py).
  *
  * Unity 2022.3 / IL2CPP. Loads libmain + libunity + libil2cpp, then drives the
  * lifecycle the Java UnityPlayer normally runs (initJni -> recreate GFX state ->
- * render loop), calling the native entry points recovered from libunity.so's
+ * render loop), calling the native entry points libunity.so registers from its
  * JNI_OnLoad (see unity_entrypoints.h). The engine owns its own EGL/GLES3 context
  * created from android_native_window(); SDL is audio/HID only.
  *
@@ -30,7 +30,11 @@
 #include "nx_video.h"
 #include "nx_gc.h"
 #include "nx_cpu.h"
+#include "nx_prof.h"
+#include "nx_frame.h"
+#include "nx_warp.h"
 #include "nx_salty.h"
+#include "nx_fps_policy.h"
 #include "nx_loading.h"
 #include <dirent.h>
 #include <strings.h>  /* strncasecmp */
@@ -47,7 +51,7 @@ extern void nx_umbra_install(so_module *mod);
 
 /* DATA_ROOT is now a FUNCTION, not a macro: the game folder is resolved at
  * runtime from the .nro's own location so the port runs from any folder under
- * sdmc:/switch (papers_please, PapersPlease, ...). See nx_gameroot.c.
+ * sdmc:/switch. See nx_gameroot.c.
  * The old macro spelling is kept as a call so the many use sites below read
  * unchanged -- but note it can no longer be string-concatenated with a literal;
  * every such site was converted to snprintf. */
@@ -55,10 +59,6 @@ extern void nx_umbra_install(so_module *mod);
 #define LIB_MAIN   "libmain.so"
 #define LIB_UNITY  "libunity.so"
 #define LIB_IL2CPP "libil2cpp.so"
-/* (The Zookeeper base defined four libFirebaseCpp*.so names here. Papers,
- * Please ships no Firebase SDK -- its only Google dependency is Play Games
- * Services, handled by pp_social_stub.c -- and the macros were never referenced
- * even in the base. Removed.) */
 
 void unity_environment_init(const char *data_root);   /* unity_glue.c */
 
@@ -123,7 +123,10 @@ static void nx_time_tick(void) {
   if (g_time_prev_ns) {
     double dt = (double)(now - g_time_prev_ns) / 1e9;
     if (dt < 0) dt = 0;
-    if (dt > 0.1) dt = 0.1;            /* clamp, mirrors Unity maximumDeltaTime */
+    /* тот же потолок, что у Time.maximumDeltaTime (physics_max_dt): Unity режет
+     * deltaTime им же, и Update не должен убегать вперёд физики */
+    const double cap = config.physics_max_dt > 0.0f ? config.physics_max_dt : 0.1;
+    if (dt > cap) dt = cap;
     g_unity_dt = (float)dt;
     g_unity_time += dt;
   }
@@ -163,6 +166,22 @@ static void *(*g_icall_scene_name)(int);
 static int   (*g_icall_scene_count)(void);
 static int64_t (*g_gc_used)(void), (*g_gc_heap)(void);
 static int (*g_gc_disabled)(void);
+
+/* Потолок шагов физики: Time.maximumDeltaTime = config.physics_max_dt.
+ * Игра его не меняет (проверено по IL), движковый -- 0.1 с из TimeManager. */
+static void  (*g_icall_set_max_dt)(float);
+static float (*g_icall_get_max_dt)(void), (*g_icall_get_fixed_dt)(void);
+static void nx_apply_physics_cap(const char *why) {
+  if (!g_icall_set_max_dt || !g_icall_get_max_dt) return;
+  const float want = config.physics_max_dt;
+  const float was = g_icall_get_max_dt();
+  if (was > want - 0.0005f && was < want + 0.0005f) return;
+  g_icall_set_max_dt(want);
+  const float fixed = g_icall_get_fixed_dt ? g_icall_get_fixed_dt() : 0.0f;
+  debugPrintf("[physics] maximumDeltaTime %.4f -> %.4f (%s); fixedDeltaTime %.4f -> до %.1f шагов физики на кадр\n",
+              was, g_icall_get_max_dt(), why, fixed, fixed > 0.0f ? want / fixed : 0.0f);
+}
+
 static void nx_diag_bind(so_module *il2cpp) {
   g_gc_used = (int64_t (*)(void))so_try_find_addr_rx(il2cpp, "il2cpp_gc_get_used_size");
   g_gc_heap = (int64_t (*)(void))so_try_find_addr_rx(il2cpp, "il2cpp_gc_get_heap_size");
@@ -179,9 +198,18 @@ static void nx_diag_bind(so_module *il2cpp) {
   debugPrintf("[diag] icall: time=%p unscaled=%p scene=%p name=%p count=%p\n",
               (void *)g_icall_time, (void *)g_icall_utime, (void *)g_icall_active_scene,
               (void *)g_icall_scene_name, (void *)g_icall_scene_count);
+  g_icall_set_max_dt   = (void (*)(float))r("UnityEngine.Time::set_maximumDeltaTime(System.Single)");
+  g_icall_get_max_dt   = (float (*)(void))r("UnityEngine.Time::get_maximumDeltaTime()");
+  g_icall_get_fixed_dt = (float (*)(void))r("UnityEngine.Time::get_fixedDeltaTime()");
+  if (!g_icall_set_max_dt || !g_icall_get_max_dt)
+    debugPrintf("[physics] icall maximumDeltaTime не найден (set=%p get=%p) -- потолок не ставлю\n",
+                (void *)g_icall_set_max_dt, (void *)g_icall_get_max_dt);
+  nx_apply_physics_cap("старт");
 }
 static void nx_diag_tick(int frame) {
-  if (g_gc_used && g_gc_heap)
+  extern void nx_alloc_diagnostics(void);
+  if(config.engine_profiler) { nx_alloc_diagnostics(); opensles_diagnostics(); }
+  if (config.engine_profiler && g_gc_used && g_gc_heap)
     debugPrintf("[gc] managed used=%lld MB heap=%lld MB disabled=%d native_stw=%d stw_passes=%u\n",
                 (long long)(g_gc_used() >> 20), (long long)(g_gc_heap() >> 20),
                 g_gc_disabled ? g_gc_disabled() : -1, nx_gc_backend_ready(),
@@ -203,6 +231,13 @@ static void nx_diag_tick(int frame) {
               frame, g_icall_time ? g_icall_time() : -1.0f, g_icall_utime ? g_icall_utime() : -1.0f,
               g_get_timescale ? g_get_timescale() : -1.0f, nx_delta_time(),
               g_icall_scene_count ? g_icall_scene_count() : -1, name);
+  nx_apply_physics_cap("повтор"); /* Independent of diagnostic verbosity. */
+  if(!config.engine_profiler)return;
+  if (g_icall_get_max_dt)
+    debugPrintf("[physics] maximumDeltaTime=%.4f fixedDeltaTime=%.4f\n", g_icall_get_max_dt(),
+                g_icall_get_fixed_dt ? g_icall_get_fixed_dt() : -1.0f);
+  extern void nx_stat_cache_report(void);
+  nx_stat_cache_report();
   /* Сам TimeManager: хук вызывался ли (g_tm), флаг паузы, точка отсчёта, шкала. */
   const uint8_t *tm = (const uint8_t *)nx_time_manager();
   if (tm)
@@ -215,32 +250,10 @@ static void nx_diag_tick(int frame) {
     debugPrintf("[diag]   TimeManager не найден\n");
   /* Full thread snapshots are reserved for actual stalls/manual requests.
    * Periodically suspending healthy gameplay threads adds hitches and once
-   * exposed an unsafe raw stack scan (r21). Lightweight counters stay enabled. */
+   * once exposed an unsafe raw stack scan. Lightweight counters stay enabled. */
 }
 
-/* Retained but currently unhooked: the Zookeeper base bound this to
- * Time.get_time / get_unscaledTime / get_fixedTime. Papers, Please's metadata
- * contains NONE of those three -- managed code stripping removed them -- so
- * there is nothing to hook it to. Kept because a less aggressively stripped
- * build of the game would want it back. */
-__attribute__((unused))
-static float nx_time_f(void)     { return (float)g_unity_time; }
-__attribute__((unused)) static int nx_frame_count(void){ return (int)g_frame_count; }
 uint32_t     port_frame_count(void){ return g_frame_count; } /* audio pump warmup gate */
-static float nx_realtime_since_startup(void) {
-  uint64_t now = nx_now_ns();
-  if (!g_time_start_ns) g_time_start_ns = now;
-  return (float)((double)(now - g_time_start_ns) / 1e9);
-}
-
-/* Papers, Please's metadata exposes realtimeSinceStartupAsDouble, NOT the float
- * realtimeSinceStartup the other ports in this lineage hook.  The managed
- * signature returns a double, so the value must come back in d0 -- returning a
- * float here would leave the engine reading whatever happened to be in the top
- * half of the register.  Same clock, different ABI slot. */
-__attribute__((unused)) static double nx_realtime_since_startup_d(void) {
-  return (double)nx_realtime_since_startup();
-}
 
 /* Часы движка: перехват TimeManager::Update. Схема из vln_nx (NaGaa95, MIT) --
  * Unity-порта той же линии загрузчиков. Через 3600 кадров Time.time и
@@ -329,27 +342,6 @@ static void nx_install_time_fix(void) {
   debugPrintf("[boot] часы движка: TimeManager::Update @libunity+0x%x -> хук, тело +0x%x, поток часов запущен\n",
               entry, body);
 }
-
-/* --- boot finish-flag probe -------------------------------------------------
- * State 6 (SetFinishFlag) walks A=*(il2cpp+0x21fd0718); B=*A; obj=*(B+0x20);
- * obj2=*(*(obj+0xc0)+0x10); holder=*(obj2+0xb8 then deref); and writes
- * *(holder+0x10)=1 -- but ONLY if holder is non-null (else it stays at state 6
- * forever). CheckInitializeFinish polls the same obj2 (+0xe0 / +0x135). We read
- * the live chain so we can see exactly which link is null / whether the finish
- * flag ever gets set, without any destructive patching. */
-static int nx_rd(uintptr_t a) {
-  MemoryInfo mi; u32 pi;
-  if (a < 0x1000) return 0;
-  if (R_FAILED(svcQueryMemory(&mi, &pi, a))) return 0;
-  if (mi.type == MemType_Unmapped || !(mi.perm & Perm_R)) return 0;
-  return 1;
-}
-/* Safe-deref helper. Its only caller in the base was nx_probe_finish(), a
- * Zookeeper-specific il2cpp diagnostic removed for this port. Kept: it is the
- * right tool if you ever need to walk a managed object graph from the loader. */
-__attribute__((unused))
-static uintptr_t nx_pd(uintptr_t a) { return nx_rd(a) ? *(volatile uintptr_t *)a : 0; }
-
 
 /* libunity ~17M + libil2cpp ~36M + headroom for relocated segments */
 #define SO_REGION_BYTES (160u * 1024 * 1024)
@@ -460,7 +452,7 @@ static void *oc_find_stack_window(size_t want, size_t *out_size) {
   return (void *)aligned;
 }
 
-/* The r15 forwarder grants SystemResourceSize in its NPDM. Reserve address
+/* The forwarder grants SystemResourceSize in its NPDM. Reserve address
  * space in Alias, shrink the physical heap, then test on-demand mapping. This
  * runs BEFORE malloc is initialized: only SVCs and static storage are allowed.
  * Preserve the heap prefix occupied by hbloader/NRO when using OverrideHeap.
@@ -597,11 +589,9 @@ static void check_syscalls(void) {
 
 /* Verify the SD layout before we touch the engine.
  *
- * The base checked for "assets/bin/Data/data.unity3d" because ITS game shipped
- * the single-bundle layout. Papers, Please does not ship a data.unity3d at all:
- * it uses the classic non-bundled layout (globalgamemanagers + level0 +
- * sharedassets0 + friends), so demanding that file was a guaranteed false
- * failure -- the loader refusing to start over a file the game never had.
+ * Unity games ship either the single-bundle layout (data.unity3d) or the
+ * classic non-bundled one (globalgamemanagers + level0 + sharedassets0 +
+ * friends); demanding one specific file makes the loader refuse a valid game.
  *
  * So this checks for what is actually there, and accepts EITHER layout:
  * a build with data.unity3d is fine, and so is one without. The only things
@@ -807,6 +797,42 @@ static void nx_limit_shader_cache(uintptr_t ub) {
 extern uint32_t g_port_exceptions;
 static uint32_t g_trace_exception_base;
 static int g_trace_exception_active;
+
+/* Default 60 FPS; explicit PC rates and None are preserved. Read FPSLocker into this same
+ * limiter instead of sleeping independently on the render thread. */
+static volatile int g_fps_target;
+static NxFpsPolicy g_fps_policy;
+int nx_fps_target(void) { return g_fps_target; }
+static int nx_target_fps(void) {
+  extern int nx_preferences_frame_rate(void);
+  const int fps = nx_fps_resolve(nx_preferences_frame_rate(), config.fps_limit, nx_salty_fps_limit());
+  g_fps_target = fps;
+  return fps;
+}
+static void nx_fps_enforce(void) {
+  const uintptr_t ub = (uintptr_t)unity_mod.load_virtbase;
+  static uint32_t get, set;
+  if (!get) get = nxo_get("unity.app_get_target_fps");
+  if (!set) set = nxo_get("unity.app_target_fps");
+  if (!get || !set) return;
+  const int now = ((int (*)(void))(ub + get))();
+  const int want = nx_fps_observe(&g_fps_policy, now, config.fps_limit, nx_salty_fps_limit());
+  g_fps_target = want;
+  if (now == want) return;
+  ((void (*)(int))(ub + set))(want);
+  static unsigned reported;
+  if (reported++ < 8) debugPrintf("[fps] targetFrameRate %d -> %d (fps_limit %d)\n", now, want, config.fps_limit);
+}
+
+/* Called immediately after the game's menu setter, on UnityMain. */
+void nxb_fps_request(int requested) {
+  const int want=nx_fps_select(&g_fps_policy,requested,config.fps_limit,nx_salty_fps_limit());
+  g_fps_target=want;
+  const uint32_t set=nxo_get("unity.app_target_fps");
+  if(set)((void (*)(int))((uintptr_t)unity_mod.load_virtbase+set))(want);
+  debugPrintf("[fps] menu request=%d effective=%d overlay=%d\n",requested,want,nx_salty_fps_limit());
+}
+
 static void nx_apply_performance_profile(void) {
   const uintptr_t ub = (uintptr_t)unity_mod.load_virtbase;
   const uint32_t trace = nxo_get("unity.app_stacktrace");
@@ -821,8 +847,8 @@ static void nx_apply_performance_profile(void) {
     const struct { uint32_t numerator, denominator; } refresh = { 60, 1 };
     /* Keep the real NWindow unchanged. Unity's existing software-resolution
      * fallback renders into this smaller target and blits to the native panel. */
-    /* r33 keeps the display native even with the filter disabled. NxFsr owns
-     * the low-resolution composition and can switch bilinear/FSR at runtime. */
+    /* The display stays native even with the filter disabled. NxFsr owns the
+     * low-resolution composition and can switch bilinear/FSR at runtime. */
     const int output_height = 720;
     ((void (*)(int, int, int, const void *))(ub + resolution))(
         output_height * 16 / 9, output_height, 1, &refresh);
@@ -830,15 +856,13 @@ static void nx_apply_performance_profile(void) {
                 output_height * 16 / 9, output_height, config.render_height, config.fsr);
   }
   if (!config.performance_mode) return;
-  /* r29's 60 Hz override changed gameplay speed. Always retain the project's
-   * timestep, including when an old config still contains physics_hz 60. */
-  if (config.physics_hz)
-    debugPrintf("[perf-profile] physics_hz override ignored; project timestep retained\n");
+  /* The physics timestep is never changed: the game's scripts assume 125 Hz,
+   * and a 60 Hz override made the whole game run at a different speed. */
   const struct { const char *key; int value; } settings[] = {
     { "unity.quality_mip_limit", 1 }, /* half width/height for mipmapped textures */
     { "unity.quality_shadows", 0 },
     { "unity.quality_aa", 0 },
-    { "unity.app_target_fps", 60 },
+    { "unity.app_target_fps", nx_target_fps() },
   };
   for (unsigned i = 0; i < sizeof settings / sizeof settings[0]; ++i) {
     const uint32_t off = nxo_get(settings[i].key);
@@ -847,6 +871,34 @@ static void nx_apply_performance_profile(void) {
       debugPrintf("[perf-profile] %s = %d\n", settings[i].key, settings[i].value);
     } else debugPrintf("[perf-profile] missing %s\n", settings[i].key);
   }
+  /* В проекте m_ReuseCollisionCallbacks 0 -- на каждый OnCollision* при 125 Гц
+   * физики создаётся новый Collision, и это мусор для GC (паузы до 215 мс).
+   * Скрипты игры объект Collision не хранят: в Assembly-CSharp нет ни полей,
+   * ни замыканий, ни корутин с этим типом. */
+  const uint32_t reuse_get = nxo_get("unity.physics_get_reuse_callbacks");
+  const uint32_t reuse_set = nxo_get("unity.physics_reuse_callbacks");
+  if (!config.collision_reuse) debugPrintf("[perf-profile] Physics.reuseCollisionCallbacks: выключено в config.txt\n");
+  else if (reuse_get && reuse_set) {
+    const int was = ((unsigned char (*)(void))(ub + reuse_get))();
+    ((void (*)(unsigned char))(ub + reuse_set))(1);
+    debugPrintf("[perf-profile] Physics.reuseCollisionCallbacks %d -> %d\n",
+                was, ((unsigned char (*)(void))(ub + reuse_get))());
+  } else debugPrintf("[perf-profile] missing unity.physics_reuse_callbacks\n");
+  /* В бою шаг физики около 2 мс, почти половину главный поток ждёт потоки PhysX.
+   * Итерации решателя берутся телом при создании, поэтому ставятся до уровней. */
+  const uint32_t solver_get = nxo_get("unity.physics_get_solver_iterations");
+  const uint32_t solver_set = nxo_get("unity.physics_solver_iterations");
+  if (!config.physics_solver) debugPrintf("[perf-profile] Physics.defaultSolverIterations: как в игре (config.txt)\n");
+  else if (solver_get && solver_set) {
+    const int was = ((int (*)(void))(ub + solver_get))();
+    ((void (*)(int))(ub + solver_set))(config.physics_solver);
+    debugPrintf("[perf-profile] Physics.defaultSolverIterations %d -> %d\n",
+                was, ((int (*)(void))(ub + solver_get))());
+  } else debugPrintf("[perf-profile] missing unity.physics_solver_iterations\n");
+  /* libil2cpp собирается с --incremental-g-c-time-slice=3 (docs/BUILD.md) */
+  const uint32_t gc_inc = nxo_get("unity.gc_is_incremental");
+  if (gc_inc) debugPrintf("[perf-profile] GarbageCollector.isIncremental = %d\n",
+                          ((unsigned char (*)(void))(ub + gc_inc))());
 }
 
 /* Unity копирует Managed в il2cpp/ один раз и отмечает это в il2cpp/unity.ver.
@@ -878,7 +930,7 @@ int main(int argc, char *argv[]) {
   game_root_init(argc, argv);
 
   socketInitializeDefault();
-  debugPrintf("[boot] === ultrakill_nx r36 (touch release / installed RomFS) ===\n");
+  debugPrintf("[boot] === ultrakill_nx r93 (Unity/GLES / lightweight runtime diagnostics; render detours opt-in) ===\n");
   nx_cpu_init();
   {
     u64 program = 0;
@@ -888,8 +940,8 @@ int main(int argc, char *argv[]) {
                 (unsigned)(g_oc_sysres >> 20), g_overcommit, g_oc_shrink_rc, g_oc_probe_rc);
   }
   if (!g_overcommit) {
-    debugPrintf("[boot] demand-memory setup unavailable; updated r15 forwarder required\n");
-    fatal_error("ULTRAKILL NX r15: launcher memory setup failed.\n\n"
+    debugPrintf("[boot] demand-memory setup unavailable; the current forwarder is required\n");
+    fatal_error("ULTRAKILL NX: launcher memory setup failed.\n\n"
                 "Install the NEW ULTRAKILL_NX_forwarder.nsp from the SD card\n"
                 "using DBI, then launch ULTRAKILL NX from HOME.\n\n"
                 "System resource: %u MB, alias: %u MB\n"
@@ -924,11 +976,17 @@ int main(int argc, char *argv[]) {
                 nx_resolved_language(),
                 crc < 0 ? "  [config.txt created]" : crc > 0 ? "  [config.txt rewritten]" : "");
   }
+  nx_cpu_apply_config();
+  /* env кэша шейдеров Mesa -- до eglInitialize в libunity (imports.c) */
+  extern void nx_shader_cache_setup(int mode);
+  nx_shader_cache_setup(config.gl_program_cache);
 
   extern void nx_support_prepare(void);
   nx_support_prepare();
   if (config.saltynx) nx_salty_init();
   nx_loading_init();
+  extern void nx_preferences_prepare(void);
+  nx_preferences_prepare();
 
   /* Sweep Unity's case-sensitivity probe files: CASESENSITIVETEST<guid> strays
    * from older builds, plus the single hidden scratch the probe is redirected
@@ -950,9 +1008,8 @@ int main(int argc, char *argv[]) {
     if (swept) debugPrintf("[boot] swept %d case-sensitivity probe file(s)\n", swept);
   }
 
-  /* Papers, Please ships NO data.unity3d. It uses the classic non-bundled Unity
-   * layout, and it was built with "Split Application Binary", so the two big
-   * serialized files arrive as 1 MB chunks (.split0 .. .splitN). libunity has a
+  /* The game uses the classic non-bundled Unity layout, and an Android build may
+   * split the big serialized files into 1 MB chunks (.split0 .. .splitN). libunity has a
    * native reader for those, but it is bound to the APK/AAssetManager path we
    * do not have -- our files are loose on the SD card. Put them back together
    * once, here, into the names the engine expects in the ordinary case.
@@ -965,7 +1022,7 @@ int main(int argc, char *argv[]) {
    * il2cpp read many files through *relative* paths ("assets/bin/Data/...") and
    * our basename_fallback stats relative to cwd, so a wrong cwd silently yields
    * empty/missing reads -> NULL il2cpp classes. chdir into DATA_ROOT so every
-   * relative read resolves under sdmc:/switch/zookeeper. (Absolute "sdmc:/..."
+   * relative read resolves under the game folder. (Absolute "sdmc:/..."
    * reads are unaffected.) */
   {
     char cwd[256] = {0};
@@ -974,8 +1031,7 @@ int main(int argc, char *argv[]) {
     char cwd2[256] = {0};
     getcwd(cwd2, sizeof cwd2);
     struct stat st;
-    /* Probe files this game actually has -- the base probed data.unity3d, which
-     * Papers, Please does not ship, so it always read 0 and looked alarming. */
+    /* Probe files this game actually has. */
     int reach_ggm  = stat("assets/bin/Data/globalgamemanagers", &st) == 0;
     int reach_meta = stat("assets/bin/Data/Managed/Metadata/global-metadata.dat", &st) == 0;
     int reach_guid = stat("assets/bin/Data/unity_app_guid", &st) == 0;
@@ -1128,11 +1184,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  /* fbstub45 PORTRAIT: ZOOKEEPER is a portrait game. Report a portrait surface
-   * (W<H) everywhere Unity reads dimensions so the engine renders upright. The
-   * compositor stretches the portrait buffer onto the landscape panel. (Stable;
-   * the 640x1137 native-render attempt crashed early in boot -- the game's
-   * pipeline appears to depend on its Screen.SetResolution low-res path.) */
+  /* Report the surface size everywhere Unity reads dimensions (config.h,
+   * screen_width/screen_height). */
   android_native_update_mode();   /* альбомная поверхность: 1280x720, в доке по config */
 
   SDL_SetMainReady();
@@ -1162,8 +1215,8 @@ int main(int argc, char *argv[]) {
    * AND libFirebaseCppApp crashes our loader in its JNI_OnLoad logging path. We
    * instead answer the SDK's native P/Invoke lookups with stubs (firebase_stub.c
    * via dlsym_fake) that make the check resolve to Available. The 4 .so files can
-   * be deleted from sdmc:/switch/zookeeper/. Firebase is cosmetic here (RemoteConfig
-   * banner/news textures), so stubbing it costs only those images. */
+   * be deleted from the game folder. Firebase is cosmetic here, so stubbing it
+   * costs nothing visible. */
   so_finalize(&main_mod);   so_flush_caches(&main_mod);
   so_finalize(&unity_mod);  so_flush_caches(&unity_mod);
   so_finalize(&il2cpp_mod); so_flush_caches(&il2cpp_mod);
@@ -1178,14 +1231,8 @@ int main(int argc, char *argv[]) {
   nx_patch_libunity((uintptr_t)unity_mod.load_virtbase);
   nx_umbra_install(&unity_mod);
 
-  /* (A Zookeeper-era diagnostic lived here: it read libunity+0xc44c34 to check
-   * whether a stack-canary patch had reached the executed code. It is REMOVED.
-   * That offset is inside Zookeeper's larger libunity; Papers, Please's is only
-   * 0x9F4928 bytes, so the read landed 2.4 MB past the end of the mapping and
-   * took a Data Abort before the engine ever started. The canary patching it
-   * was investigating is not done by this port either -- so_patch_stack_canaries()
-   * is deliberately not called; per-thread bionic TLS makes the guard consistent
-   * instead. Nothing to probe, nothing to keep.) */
+  /* so_patch_stack_canaries() is deliberately not called: per-thread bionic TLS
+   * makes the stack guard consistent instead. */
 
   /* The main thread runs init_array + the engine lifecycle; give it its own
    * stable bionic TLS for the stack-protector guard (tpidr_el0+0x28). */
@@ -1201,6 +1248,9 @@ int main(int argc, char *argv[]) {
   nx_limit_shader_cache((uintptr_t)unity_mod.load_virtbase);
   nx_set_app_path((uintptr_t)unity_mod.load_virtbase);
   nx_install_time_fix();
+  if (config.engine_profiler)   /* где UnityMain/GfxWorker тратят время; выключен по умолчанию */
+    nx_prof_start((uintptr_t)unity_mod.load_virtbase, unity_mod.load_size,
+                  (uintptr_t)il2cpp_mod.load_virtbase, il2cpp_mod.load_size);
   nx_check_il2cpp_cache();
 
   /* fake JNI + our environment, then HID */
@@ -1254,23 +1304,18 @@ int main(int argc, char *argv[]) {
 
   /* Register the JavaVM with the il2cpp runtime. il2cpp caches the VM in a
    * global it later checks; without it, il2cpp logs "Java VM not initialized"
-   * and every managed AndroidJNI / AndroidJavaObject call (the Twitter SDK +
-   * the SWIG-wrapped AppUtil module the first scene initializes) fails, hanging
+   * and every managed AndroidJNI / AndroidJavaObject call fails, hanging
    * scene load.
    *
    * We do NOT call libil2cpp's JNI_OnLoad: its first action is a log via
    * __android_log_print, whose GOT slot in libil2cpp is mis-bound (resolves to
    * a heap address -> Instruction Abort). Its only *essential* effects are two
-   * global stores (verified by disassembling this exact 62f2 libil2cpp's
-   * see pp_il2cpp.h. */
+   * global stores; the JavaVM slot comes from offsets.ini (il2cpp.javavm). */
   {
     uintptr_t b = (uintptr_t)il2cpp_mod.load_virtbase;
-    /* Papers, Please's libil2cpp JNI_OnLoad (@0x5f2990) does exactly ONE
-     * essential thing: it caches the JavaVM* in a global.  Unlike Zookeeper's
-     * and PvZ's builds it does NOT also store a JNI handler function pointer --
-     * disassembling it shows one store and two calls, nothing more.  So we
-     * replicate the single store and no more; inventing a second write here
-     * would scribble on an unrelated global.  (We do not call JNI_OnLoad itself:
+    /* libil2cpp's JNI_OnLoad does exactly ONE essential thing: it caches the
+     * JavaVM* in a global. We replicate that single store and no more; inventing
+     * a second write would scribble on an unrelated global.  (We do not call JNI_OnLoad itself:
      * its first action logs through __android_log_print, whose GOT slot in
      * libil2cpp is mis-bound under our loader -> Instruction Abort.) */
     const uint32_t vm_off = nxo_get(NXO_JAVAVM);
@@ -1318,7 +1363,10 @@ int main(int argc, char *argv[]) {
 
   int frame = 0;
   while (appletMainLoop() && !jni_quit_requested) {
+    nx_frame_loop_begin();
     diag_frame(frame);   // heartbeat: lets the watchdog see progress (or its absence)
+    extern void nxb_scope_poll(void);
+    nxb_scope_poll();
     nx_time_tick();      // advance our managed-Time clock once per frame
     /* fbstub42: the engine clock is now fixed at its true source by the
      * TimeManager::Update entry hook (installed at boot, see nx_install_time_fix):
@@ -1329,26 +1377,17 @@ int main(int argc, char *argv[]) {
     nxb_frame();
     android_native_feed_hid((uint8_t (*)(void*,void*,void*,int))Unity_nativeInjectEvent,
                             fake_env, fake_unityplayer_thiz);
+    nx_frame_render_begin();
     if (!Unity_nativeRender(fake_env, fake_unityplayer_thiz)) break;
+    nx_frame_render_end();
     if (frame == 0) {
       /* ---------------------------------------------------------------------
        * Frame-0 il2cpp work.
        *
-       * The Zookeeper base did a great deal more here -- forcing
-       * Application.internetReachability to NotReachable, stubbing
-       * FirebaseManager.IsGetMessage, forcing a FirebaseLoading state gate, and
-       * installing a native TimeManager::Update re-drive.  Every one of those
-       * was a workaround for Zookeeper's own boot coroutine and its Firebase
-       * SDK.  Papers, Please has neither: its managed code is Haxe
-       * cross-compiled to C# hosted by a thin HostUnity shim, with no Firebase,
-       * no boot state machine, and no async scene-load pipeline to unblock.
-       * Carrying those hooks across would mean patching il2cpp offsets that
-       * point at unrelated game code.  They are REMOVED, not merely disabled.
-       *
-       * What remains is the part that is about the engine rather than the game.
+       * Only engine-level work: GC mode, frame and render hooks, game fixes.
        * ------------------------------------------------------------------- */
 
-      /* r23: the matching Boehm backend pauses actual Horizon threads and
+      /* The matching Boehm backend pauses actual Horizon threads and
        * publishes their stacks/register roots. Keep its normal collection mode.
        * Reject an older library rather than running with unbounded garbage. */
       if (nx_gc_backend_ready()) {
@@ -1373,27 +1412,19 @@ int main(int argc, char *argv[]) {
       {
         nx_time_bind_timescale(&il2cpp_mod);
         debugPrintf("[time] native managed accessors retained (Update/FixedUpdate aware)\n");
-        /* Logger.IsLogTypeAllowed -> «return true»: игра на старте ставит
-         * filterLogType = Error, и без этого её сообщения в журнал не попадают. */
-        const uint32_t lg = nxo_get("il2cpp.logger_is_allowed");
-        if (lg) {
-          const uint32_t ret1[2] = { 0x52800020u /* mov w0,#1 */, 0xd65f03c0u /* ret */ };
-          so_patch_code((void *)((uintptr_t)il2cpp_mod.load_virtbase + lg), ret1, sizeof ret1);
-          debugPrintf("[boot] журнал игры включён: Logger.IsLogTypeAllowed @il2cpp+0x%x\n", lg);
-        }
-        /* Logger.set_filterLogType -> ret: Bootstrap.Start ставит фильтр Error, а
-         * IsLogTypeAllowed il2cpp встраивает в вызывающих, так что надёжнее не
-         * дать фильтру встать вовсе. */
-        const uint32_t lf = nxo_get("il2cpp.logger_set_filter");
-        if (lf) {
-          const uint32_t ret0[1] = { 0xd65f03c0u /* ret */ };
-          so_patch_code((void *)((uintptr_t)il2cpp_mod.load_virtbase + lf), ret0, sizeof ret0);
-          debugPrintf("[boot] фильтр журнала игры отключён: Logger.set_filterLogType @il2cpp+0x%x\n", lf);
-        }
+        /* Preserve the game's logger filter. Forcing all informational logs
+         * also creates managed formatting/stack work during enemy activation.
+         * Native performance/error diagnostics bypass that filter. */
+        debugPrintf("[boot] game log filter preserved; native diagnostics active\n" );
         so_flush_caches(&il2cpp_mod);
         nx_diag_bind(&il2cpp_mod);
         nx_video_install_hooks(&il2cpp_mod);
         nx_apply_performance_profile();
+        /* после первого кадра все модули движка уже вписали свои фазы в таблицу */
+        nx_frame_install((uintptr_t)unity_mod.load_virtbase, unity_mod.load_size);
+        nx_hook_install((uintptr_t)unity_mod.load_virtbase, unity_mod.load_size);
+        nx_warp_install((uintptr_t)unity_mod.load_virtbase);
+        { extern void nx_game_fixes_install(uintptr_t); nx_game_fixes_install((uintptr_t)il2cpp_mod.load_virtbase); }
       }
     }
     if (g_trace_exception_active &&
@@ -1403,11 +1434,12 @@ int main(int argc, char *argv[]) {
       g_trace_exception_active = 0;
       debugPrintf("[diag] captured exception samples; further full stack walks disabled\n");
     }
+    if (frame > 0) nx_fps_enforce();
     if (frame > 0 && (frame % 300) == 0) {
       nx_diag_tick(frame);
       debugPrintf("[diag] exceptions=%u\n", __atomic_load_n(&g_port_exceptions, __ATOMIC_RELAXED));
     }
-    if (frame < 5 || (frame % 120) == 0) debugPrintf("[boot] frame %d rendered\n", frame);
+    if (frame < 5 || (config.engine_profiler && (frame % 120) == 0)) debugPrintf("[boot] frame %d rendered\n", frame);
     frame++;
   }
 
@@ -1417,6 +1449,9 @@ int main(int argc, char *argv[]) {
    * crashes the system". svcExitProcess() terminates the whole process (every
    * thread) atomically in the kernel BEFORE anything is torn down, so nothing can
    * race the shutdown. The system reclaims all resources and returns to HOME. */
+  extern void nx_log_flush(void);
+  nx_salty_shutdown();
+  nx_log_flush();
   svcExitProcess();
   return 0;
 }

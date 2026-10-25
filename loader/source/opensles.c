@@ -24,7 +24,7 @@
 // --- OpenSL ES constants ----------------------------------------------------
 
 #define SL_RESULT_SUCCESS              0
-#define SL_RESULT_PARAMETER_INVALID    0x0D
+#define SL_RESULT_PARAMETER_INVALID    0x02
 #define SL_RESULT_FEATURE_UNSUPPORTED  0x0C
 
 #define SL_BOOLEAN_FALSE 0
@@ -43,7 +43,7 @@ typedef int16_t  SLint16;
 typedef uint8_t  SLuint8;
 typedef uint32_t SLresult;
 typedef uint32_t SLboolean;
-typedef int32_t  SLmillibel;
+typedef int16_t  SLmillibel;
 
 // PCM data format (samplesPerSec is in milliHz per the spec)
 typedef struct {
@@ -166,7 +166,7 @@ typedef struct {
   SLresult (*GetStereoPosition)(void *self, SLint32 *p);
 } SLVolumeItf_;
 
-// SLPlaybackRateItf (Chaos Rings 3 requests it for pitch-shifted SE). We don't
+// SLPlaybackRateItf (some engines request it for pitch-shifted SE). We don't
 // resample, so SetRate is accepted but ignored; the spec method order matters.
 typedef struct {
   SLresult (*SetRate)(void *self, SLint16 rate);
@@ -177,7 +177,7 @@ typedef struct {
   SLresult (*GetRateRange)(void *self, SLuint8 i, SLint16 *min, SLint16 *max, SLint16 *step, SLuint32 *prop);
 } SLPlaybackRateItf_;
 
-// SLAndroidConfigurationItf -- CR3 requests it with req=SL_BOOLEAN_TRUE at
+// SLAndroidConfigurationItf -- engines request it with req=SL_BOOLEAN_TRUE at
 // CreateAudioPlayer, so it MUST be obtainable or the engine aborts the player
 // (the symptom: a player is created but never set PLAYING / never enqueues).
 // It only uses SetConfiguration (stream type / usage), which we can ignore.
@@ -219,7 +219,9 @@ typedef struct Player {
   int is_float;  // 1 if samples are 32-bit float, 0 if signed integer
   int playing;
   int drained;   // consecutive callbacks this playing player produced no audio
-  float gain; // linear, from SetVolumeLevel (millibels)
+  float gain; // volume gain, independent of mute
+  int volume_mb;
+  int muted;
 
   slBufferQueueCallback cb;
   void *cb_ctx;
@@ -254,6 +256,25 @@ static int g_dev_rate = 44100;
 static Player *g_players[MAX_PLAYERS];
 static int g_player_count = 0;
 static SDL_mutex *g_reg_lock = NULL;
+static unsigned g_audio_callbacks, g_audio_peak, g_audio_audible;
+
+/* Called from main-thread diagnostics. Never wait behind an audio/FMOD lock. */
+void opensles_diagnostics(void) {
+  unsigned calls = __atomic_load_n(&g_audio_callbacks, __ATOMIC_RELAXED);
+  unsigned peak = __atomic_exchange_n(&g_audio_peak, 0, __ATOMIC_RELAXED);
+  unsigned audible = __atomic_load_n(&g_audio_audible, __ATOMIC_RELAXED);
+  debugPrintf("[audio] callbacks=%u audible=%u peak=%u device=%u status=%d\n", calls, audible, peak, g_dev, g_dev ? SDL_GetAudioDeviceStatus(g_dev) : -1);
+  if (!g_reg_lock || SDL_TryLockMutex(g_reg_lock) != 0) return;
+  for (int i=0; i<g_player_count; ++i) {
+    Player *p=g_players[i];
+    if (!p || SDL_TryLockMutex(p->lock) != 0) continue;
+    int playing=p->playing, muted=p->muted, mb=p->volume_mb;
+    int queued=(p->q_tail-p->q_head+BQ_SLOTS)%BQ_SLOTS;
+    SDL_UnlockMutex(p->lock);
+    debugPrintf("[audio] player=%d play=%d mute=%d volume_mb=%d queued=%d\n", i, playing, muted, mb, queued);
+  }
+  SDL_UnlockMutex(g_reg_lock);
+}
 
 #define MOVIE_RING_FRAMES 65536
 static SDL_mutex *g_movie_lock = NULL;
@@ -292,8 +313,11 @@ static inline int32_t read_sample_s16(const void *buf, long k, int sbytes, int i
 // otherwise the engine's mixer thread (holding its own mutex, calling Enqueue
 // which wants our lock) deadlocks against us.
 static void mix_player(Player *p, int32_t *acc, int frames) {
-  if (!p->playing)
-    return;
+  SDL_LockMutex(p->lock);
+  const int playing = p->playing;
+  const float g = p->muted ? 0.0f : p->gain;
+  SDL_UnlockMutex(p->lock);
+  if (!playing) return;
 
   // A playing player with nothing queued is a finished one-shot SE the engine
   // fired and never Destroy'd; count the dry callbacks so alloc can recycle it.
@@ -303,7 +327,6 @@ static void mix_player(Player *p, int32_t *acc, int frames) {
   if (dry) { if (p->drained < (1 << 20)) p->drained++; return; }
   p->drained = 0;
 
-  const float g = p->gain;
   const int stereo = (p->channels >= 2);
   const int sbytes = p->sbytes > 0 ? p->sbytes : 2;    // bytes per sample
   const int is_float = p->is_float;
@@ -424,7 +447,13 @@ static void SDLCALL audio_callback(void *ud, Uint8 *stream, int len) {
     int32_t a = v < 0 ? -v : v;
     if (a > peak) peak = a;
   }
+  __atomic_fetch_add(&g_audio_callbacks, 1, __ATOMIC_RELAXED);
+  /* Only this thread raises peak; diagnostics may atomically reset it. */
+  unsigned old_peak = __atomic_load_n(&g_audio_peak, __ATOMIC_RELAXED);
+  while ((unsigned)peak > old_peak && !__atomic_compare_exchange_n(&g_audio_peak,
+         &old_peak, (unsigned)peak, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
   if (peak > 64) {
+    __atomic_fetch_add(&g_audio_audible, 1, __ATOMIC_RELAXED);
     static int once = 0;
     if (!once) { once = 1; debugPrintf("[fmod] OpenSL: first non-silent audio to device (peak=%d) -- SOUND IS ON\n", peak); }
   }
@@ -703,24 +732,37 @@ static const SLPlayItf_ play_vtable = {
 
 static SLresult vol_SetVolumeLevel(void *self, SLmillibel level) {
   Player *p = CONTAINER(self, Player, vol_vt);
-  // Clamp to the valid OpenSL volume range [-9600, 0] mB before converting. CR3
-  // sometimes passes a garbage/zero-extended value (e.g. 32768) that would yield
+  // Clamp to the valid OpenSL volume range [-9600, 0] mB before converting. A
+  // caller may pass a garbage/zero-extended value (e.g. 32768) that would yield
   // an astronomically huge gain; treat out-of-range high as 0 mB (unity/full) so
   // the single unified-mix player is never accidentally muted or overflowed.
   int mb = (int)level;
   if (mb > 0) mb = 0;
   if (mb < -9600) mb = -9600;
+  SDL_LockMutex(p->lock);
+  p->volume_mb = mb;
   p->gain = mb_to_linear(mb);
+  SDL_UnlockMutex(p->lock);
   return SL_RESULT_SUCCESS;
 }
-static SLresult vol_GetVolumeLevel(void *self, SLmillibel *p) { (void)self; if (p) *p = 0; return SL_RESULT_SUCCESS; }
+static SLresult vol_GetVolumeLevel(void *self, SLmillibel *value) {
+  Player *p = CONTAINER(self, Player, vol_vt);
+  if (!value) return SL_RESULT_PARAMETER_INVALID;
+  SDL_LockMutex(p->lock); *value = p->volume_mb; SDL_UnlockMutex(p->lock);
+  return SL_RESULT_SUCCESS;
+}
 static SLresult vol_GetMaxVolumeLevel(void *self, SLmillibel *p) { (void)self; if (p) *p = 0; return SL_RESULT_SUCCESS; }
 static SLresult vol_SetMute(void *self, SLboolean m) {
   Player *p = CONTAINER(self, Player, vol_vt);
-  if (m) p->gain = 0.0f;
+  SDL_LockMutex(p->lock); p->muted = !!m; SDL_UnlockMutex(p->lock);
   return SL_RESULT_SUCCESS;
 }
-static SLresult vol_GetMute(void *self, SLboolean *p) { (void)self; if (p) *p = 0; return SL_RESULT_SUCCESS; }
+static SLresult vol_GetMute(void *self, SLboolean *value) {
+  Player *p = CONTAINER(self, Player, vol_vt);
+  if (!value) return SL_RESULT_PARAMETER_INVALID;
+  SDL_LockMutex(p->lock); *value = p->muted; SDL_UnlockMutex(p->lock);
+  return SL_RESULT_SUCCESS;
+}
 static SLresult vol_enable(void *self, SLboolean e) { (void)self; (void)e; return SL_RESULT_SUCCESS; }
 static SLresult vol_isenabled(void *self, SLboolean *p) { (void)self; if (p) *p = 0; return SL_RESULT_SUCCESS; }
 static SLresult vol_setpos(void *self, SLint32 v) { (void)self; (void)v; return SL_RESULT_SUCCESS; }

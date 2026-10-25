@@ -1,8 +1,7 @@
-/* android_native_unity.c -- the 27 NDK symbols libunity.so imports, for the
- * PAPERS, PLEASE Switch port. Unity is NOT a NativeActivity, so unlike cr3_nx's
- * android_native.c there is no ANativeActivity glue / android_main / AInputQueue
- * here: the engine is driven by the JNI-registered natives (see main.c). We only
- * provide the raw NDK functions libunity calls directly:
+/* android_native_unity.c -- the 27 NDK symbols libunity.so imports. Unity is
+ * NOT a NativeActivity, so there is no ANativeActivity glue / android_main /
+ * AInputQueue here: the engine is driven by the JNI-registered natives (see
+ * main.c). We only provide the raw NDK functions libunity calls directly:
  *
  *   ANativeWindow_acquire/_release/_fromSurface/_setBuffersGeometry/
  *                _getWidth/_getHeight/_getFormat      -> libnx NWindow
@@ -10,11 +9,9 @@
  *                                                     -> condvar wait/wake
  *   ASensorManager_ , ASensorEventQueue_ , ASensor_   -> "no sensors"
  *
- * IMPORTANT context-ownership note: the engine creates its OWN EGL context from
- * the ANativeWindow (cr3_nx's main.c creates none). The host must NOT create an
- * SDL_GL / EGL context. Use SDL for audio + HID only. Delete the
- * SDL_GL_SetAttribute/SDL_GL_CreateContext/SDL_GL_SwapWindow calls from the
- * earlier main_skeleton.c; the engine calls eglSwapBuffers itself.
+ * Context ownership: the engine creates its OWN EGL context from the
+ * ANativeWindow, so the host must NOT create an SDL_GL / EGL context (SDL is
+ * for audio + HID only). The engine calls eglSwapBuffers itself.
  *
  * Needs devkitA64 + libnx (switch.h) + switch-mesa. Not host-compilable.
  */
@@ -99,10 +96,10 @@ int nx_screen_dpi(void) {
 
 u32 android_native_window_width (void){ return g_win_w; }
 u32 android_native_window_height(void){ return g_win_h; }
-/* One-shot report of exactly what the game is told about the display. Papers,
- * Please chooses its layout from these (HostUnity.Monitor.detectPlatformKind
- * reads dpi, physical size and aspect), so if the presentation looks wrong these
- * four numbers are the first thing to check against the panel. */
+/* One-shot report of exactly what the game is told about the display. Unity
+ * derives Screen.dpi, the physical size and the aspect from these, so if the
+ * presentation looks wrong these four numbers are the first thing to check
+ * against the panel. */
 void android_native_log_metrics(void) {
   static int done = 0;
   if (done) return;
@@ -287,8 +284,8 @@ int32_t  ANativeWindow_setBuffersGeometry(ANativeWindow *w, int32_t width, int32
 
 /* ==========================================================================
  * ALooper -- Unity uses it as a per-thread wait/wake primitive (not real fd
- * polling), so a condvar-backed looper is sufficient. If the engine turns out
- * to register real fds, port cr3_nx's fake-fd PollItem layer in here.
+ * polling), so a condvar-backed looper is sufficient. Real fd registration
+ * would need the fake-fd PollItem layer of the base loader (fakefd.c).
  * ========================================================================== */
 #define ALOOPER_POLL_WAKE     (-1)
 #define ALOOPER_POLL_TIMEOUT  (-3)
@@ -346,8 +343,8 @@ int ALooper_addFd(ALooper *l,int fd,int ident,int events,void *cb,void *data){
 int ALooper_removeFd(ALooper *l,int fd){ (void)l;(void)fd; return 1; }
 
 /* ==========================================================================
- * Sensors -- report none. (CR3 imported no ASensorManager; Unity does, so these
- * must exist and return a clean empty state rather than be missing symbols.)
+ * Sensors -- report none. Unity imports ASensorManager, so these must exist and
+ * return a clean empty state rather than be missing symbols.
  * ========================================================================== */
 void *ASensorManager_getInstance(void){ static int x; return &x; }
 void *ASensorManager_getInstanceForPackage(const char *p){ (void)p; return ASensorManager_getInstance(); }
@@ -369,7 +366,8 @@ int         ASensor_getType      (const void *s){ (void)s; return 0; }
 float       ASensor_getResolution(const void *s){ (void)s; return 0.0f; }
 int         ASensor_getMinDelay  (const void *s){ (void)s; return 0; }
 
-/* cr3 dead-handler stub: no orientation sensor -> report level. */
+/* Linked by jni_fake.c's unused fallback handlers: no orientation sensor ->
+ * report level. */
 void android_get_orientation(float *x, float *y, float *z){
   if (x) *x = 0.0f;
   if (y) *y = 0.0f;

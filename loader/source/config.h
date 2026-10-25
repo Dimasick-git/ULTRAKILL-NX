@@ -1,9 +1,8 @@
-/* config.h -- Papers, Please (Android/Unity) Switch wrapper configuration
+/* config.h -- ULTRAKILL NX: настройки загрузчика и раскладка памяти
  *
- * Forked from the Zookeeper DX wrapper, which is the right base here: Papers,
- * Please is the SAME Unity minor version (2022.3.62f2) and, like Zookeeper, is
- * a PORTRAIT game -- so the TATE rotation path and the pointer mapping that
- * goes with it are inherited rather than reinvented.
+ * Загрузчик вырос из so-loader портов Unity-игр (Andy Nguyen, fgsfds и их
+ * последователи, см. CREDITS.md); игра здесь -- Android-сборка ULTRAKILL
+ * (Unity 2022.3, IL2CPP), альбомная.
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -12,135 +11,75 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
-// The engine + libc++ + huge mvgl page cache need a generous newlib heap; the
-// rest of system memory is handed to the .so loader (see __libnx_initheap).
-#define MEMORY_MB 768
-
-// mmap arena. Unity reserves big *256MB-aligned* pools by over-mmapping a larger
-// region then munmapping the unaligned head/tail to keep an aligned middle. A
-// plain malloc/free-per-mmap frees the WHOLE block when the head is trimmed and
-// corrupts the kept middle -- which is the TLSF "next_free == NULL" allocator
-// crash. We instead back anonymous mmaps from a dedicated, 256MB-aligned arena
-// with a per-page used-bitmap (carved in __libnx_initheap) so sub-range munmap
-// frees exactly the trimmed pages. Big requests are handed back 256MB-aligned so
-// Unity only ever trims the (reusable) tail.
+// mmap arena. Unity reserves big aligned pools by over-mmapping a larger region
+// then munmapping the unaligned head/tail to keep an aligned middle. A plain
+// malloc/free-per-mmap frees the WHOLE block when the head is trimmed and
+// corrupts the kept middle -- the TLSF "next_free == NULL" allocator crash. We
+// instead back anonymous mmaps from a dedicated aligned arena with a per-page
+// used-bitmap (carved in __libnx_initheap) so sub-range munmap frees exactly the
+// trimmed pages. Big requests are handed back aligned so Unity only ever trims
+// the (reusable) tail.
 #define MMAP_ARENA_ALIGN    ((size_t)64 * 1024 * 1024)    // регионы Unity -- по 64 МБ: patch.unity.region* меняет зернистость 256 -> 64 МБ
-#define MMAP_ARENA_RESERVE  ((size_t)1792 * 1024 * 1024)  // heap-backed cap; now 28x64MB blocks (was 7x256MB), same bytes
+#define MMAP_ARENA_RESERVE  ((size_t)1792 * 1024 * 1024)  // heap-backed cap: 28 blocks of 64 MB
 
 // Stack-region overcommit (OC) arena (see libc_shim.c). svcMapMemory can only
 // alias into the 2048MB stack region, so we hold the big PROT_NONE reservations
-// in a stack-region window and back the (~80MB) committed pages from a small
-// heap bump-pool. Heap-backed arena (1792MB) + OC window (1280MB) = 12x256MB
-// blocks of reservation address space for Unity, but only ~80MB real commits.
+// in a stack-region window and back the committed pages from a heap pool.
 #define OC_WINDOW_BYTES     ((size_t)1536 * 1024 * 1024)  // 24x64MB blocks of cheap PROT_NONE reservation in the stack hole
-/* Commit-pool: real memory backing the pages the engine actually touches.
- *
- * Raised from the base's 256 MB, which was sized for ITS game ("~80MB observed").
- * That number does not transfer. Papers, Please decodes its art out of a
- * TextAsset blob into uncompressed RGBA Image buffers and keeps them in its own
- * cache (HostUnity.CachedTexture, evicted by lastUsedFrame) -- so its working set
- * GROWS during a session as more documents, stamps and portraits get touched,
- * rather than sitting flat the way a pre-baked scene does.
- *
- * That is consistent with the reported failure: boots and plays fine, then dies
- * partway into a session with a NULL dereference immediately after an allocation
- * call returned. malloc/mmap handing back NULL under pressure, dereferenced
- * unchecked, is exactly that crash shape.
- *
- * 640 MB against a 608 MB newlib heap fits the same physical budget the base
- * used; we are moving headroom from "reserved but unused" into the pool that
- * actually ran out. If you see "[oc] commit-pool EXHAUSTED" in debug.log, raise
- * this further and drop OVERCOMMIT_HEAP_MB by the same amount -- the log names
- * which side ran out, so you never have to guess. */
+/* Commit pool: real memory backing the pages the engine actually touches.
+ * A NULL from malloc/mmap under pressure, dereferenced unchecked, shows up as a
+ * crash right after an allocation; this pool is what runs out first. If you see
+ * "[oc] commit-pool EXHAUSTED" in debug.log, raise this and drop
+ * OVERCOMMIT_HEAP_MB by the same amount -- the log names which side ran out. */
 #define OC_POOL_BYTES       ((size_t) 640 * 1024 * 1024)
 
-// Overcommit (alias-region) mode: Unity reserves multi-GB of 256MB pools with
+// Overcommit (alias-region) mode: Unity reserves multi-GB of pools with
 // mmap(PROT_NONE) and commits only the sub-ranges it touches via mprotect. On a
-// fully-backed heap arena every reservation costs real RAM (9 pools == the whole
-// arena, starving il2cpp). When svcMapPhysicalMemory + a large alias region are
-// available we instead reserve a big *virtual* window there (PROT_NONE costs only
-// address space) and commit physical pages on demand -- true overcommit, matching
-// Android. This is the virtual window size (cheap; the alias region is tens of GB).
+// fully-backed heap arena every reservation costs real RAM and starves il2cpp.
+// When svcMapPhysicalMemory + a large alias region are available we instead
+// reserve a big *virtual* window there (PROT_NONE costs only address space) and
+// commit physical pages on demand -- true overcommit, matching Android. This is
+// the virtual window size (cheap; the alias region is tens of GB).
 #define MMAP_VIRT_RESERVE   ((size_t)6144 * 1024 * 1024)  // 6 GB virtual reservation window
 // Heap kept (svcSetHeapSize) in overcommit mode: newlib malloc + .so load zone.
 // The rest of the physical limit is freed for on-demand commits. 2MB-aligned.
-#define OVERCOMMIT_HEAP_MB  608u
+// r89: GPU BOs share newlib's heap. r88 hit GL OOM with ~1.2GB alias
+// commits while total RAM still had room; reserve more heap for large BOs.
+#define OVERCOMMIT_HEAP_MB  800u
 
-/* Papers, Please ships the standard modern Unity trio: libmain.so dlopens
- * libunity.so which dlopens libil2cpp.so. There is NO lib_burst_generated.so --
- * the game uses no Burst jobs, so unlike the PvZ Fusion and CloverPit ports you
- * do not need to supply one. (SO_NAME is inherited from the Chaos Rings 3
- * lineage and is unused on this path; main.c loads the trio by name.) */
+/* Папка игры на SD: sdmc:/switch/ultrakill. Unity грузит обычную тройку
+ * libmain.so -> libunity.so -> libil2cpp.so (main.c), Burst не используется. */
 #define GAME_FOLDER  "ultrakill"
 
-/* ---------------------- Android package identity -------------------------
- * *** VERIFY THESE TWO AGAINST YOUR APK BEFORE RELEASE. ***
- *
- * They are returned by getPackageName() and by the PackageInfo.versionName
- * getter, i.e. they become Application.identifier and Application.version.
- * They could NOT be recovered from the .so files you supplied -- the package
- * name lives in AndroidManifest.xml, not in libil2cpp -- so the values below
- * are placeholders, not derived facts. The Zookeeper base had its own game's
- * strings hardcoded in two separate files; they are centralised here so there
- * is exactly one place to fix.
- *
- * GAME_VERSION_NAME is now REAL: assets/Version.txt in the shipped data reads
- * 1.4.15.128. Only the package name is still a guess.
- *
- * To get it:
- *     aapt dump badging YourGame.apk | head -1
- * or unzip the APK and read the `package=` / `versionName=` attributes from
- * AndroidManifest.xml, or read the id= parameter off the Play Store URL.
- *
- * How much does it matter? Not much here: Unity uses the package name to build
- * /data/data/<pkg>/... paths that this port overrides to sdmc anyway, and
- * Papers, Please's own Haxe-side code never reads either value. But the
- * Zookeeper base hit a real boot stall from a BLANK Application.version, so a
- * plausible non-empty version string is worth keeping. */
+/* Android package identity: getPackageName() и PackageInfo.versionName, то есть
+ * Application.identifier и Application.version. Пути /data/data/<pkg>/ порт всё
+ * равно переводит на SD, но пустая версия приложения у Unity приводит к зависанию
+ * на старте, поэтому строка нужна непустая. */
 #define GAME_PACKAGE       "com.ultrakillnx.port"      /* задаётся нами в Player Settings сборки */
 #define GAME_VERSION_NAME  "4.1"                       /* bundleVersion из PlayerSettings игры */
-#define SO_NAME      "libunity.so"
-#define SO_CPP_NAME  "libil2cpp.so"
-
-// the main game archive (an APK asset). The "10007" is the APK versionCode.
-#define MAIN_MVGL    "main.10007.android.mvgl"
 
 #define CONFIG_NAME "config.txt"
-#define LOG_NAME    "sdmc:/switch/" GAME_FOLDER "/debug.log"
 
-// Returned for getenv("HOME")/getpwuid()->pw_dir. Unity computes a home/cache dir
-// during engine init; our env has no HOME and no passwd db, so point it at the
-// (writable) game data root instead of letting it deref a NULL passwd.
-/* Returned for getenv("HOME")/getpwuid()->pw_dir, used as the il2cpp data dir,
- * and -- importantly for this game -- the root of the save location. Papers,
- * Please does NOT use PlayerPrefs: HostUnity.UnityPlatformDisk writes real files
- * via getPersistentString/setPersistentString into a saveDir under the
- * persistent data path. Move this between builds and you orphan saves. */
+/* Returned for getenv("HOME")/getpwuid()->pw_dir: Unity computes a home/cache
+ * dir during engine init, and our env has no HOME and no passwd db. It is also
+ * the il2cpp data dir and the root of persistentDataPath -- saves live under it,
+ * so moving it between builds orphans them. */
 #define GAME_HOME   "sdmc:/switch/" GAME_FOLDER
 
-// flip to 1 (and build) to get file logging (debug.log) for on-hardware debugging
-#define DEBUG_LOG 1   /* пока порт не заведён на железе, журнал нужен всегда */
-/* The render surface the engine believes it has, in portrait orientation
- * (720x1280 handheld, 1080x1920 docked). android_native_update_mode() keeps
- * these in step with the real mode; imports.c uses them as the fallback when
- * eglQuerySurface reports 0x0, which mesa on this platform does. */
+// file logging (debug.log) for on-hardware debugging
+#define DEBUG_LOG 1
+/* The render surface the engine believes it has (1280x720 handheld, 1920x1080
+ * docked with docked_1080p). android_native_update_mode() keeps these in step
+ * with the real mode; imports.c uses them as the fallback when eglQuerySurface
+ * reports 0x0, which mesa on this platform does. */
 extern int screen_width;
 extern int screen_height;
 
 /* ---------------------------- Display metrics ----------------------------
- * Reported through DisplayMetrics, and load-bearing: Papers, Please picks its
- * layout from it (HostUnity.Monitor.detectPlatformKind /
- * getSuggestedHandheldPlatformKind read dpi, deviceWidthInInches,
- * deviceHeightInInches and aspect). Not a config option -- the Switch is one
- * known panel, so there is nothing for the player to tune.
- *
- * 237 dpi is the real handheld panel: 1280x720 across 6.2 inches diagonal.
- *
- * The docked case is NOT simply the same number. Docked we render 1080x1920
- * instead of 720x1280, and if the dpi stayed at 237 the game would compute a
- * 4.6" x 8.1" device -- a tablet -- and could switch layout on docking. Scaling
- * the reported dpi by the same 1.5x keeps the DERIVED PHYSICAL SIZE constant, so
- * the game sees one device whichever mode it is in. nx_screen_dpi() does that. */
+ * Reported through DisplayMetrics. 237 dpi is the real handheld panel: 1280x720
+ * across 6.2 inches diagonal. Docked the reported dpi is scaled with the render
+ * size, so the derived physical size stays constant and the game sees one device
+ * whichever mode it is in. nx_screen_dpi() does that. */
 #define SCREEN_DPI_HANDHELD 237
 
 typedef struct {
@@ -153,10 +92,29 @@ typedef struct {
   int   shader_chunks; /* bounded decompressed shader cache, 16 x 16 MiB */
   int   performance_mode; /* 60 FPS target, lower texture/lighting quality */
   int   render_height; /* software render resolution; native display stays 720p */
-    int   physics_hz; /* retired override: accepted for migration, never applied */
+  float physics_max_dt; /* Time.maximumDeltaTime, с: потолок шагов физики за кадр */
+  int   engine_profiler; /* 1 = сэмплирующий профайлер UnityMain/GfxWorker в журнал (default 0) */
+  int   frame_stats; /* 1 = [frame]: фазы кадра в журнал (default); старое 2 переводится в 1 */
+  int   swap_interval; /* 0 = показ без ожидания развёртки, 1 = всегда ждать, 2 = по FPS (default) */
+  int   collision_reuse; /* 1 = Physics.reuseCollisionCallbacks (меньше мусора для GC, default) */
+  int   worker_core0; /* 1 = главный поток 0x2b, Job.Worker и на ядре 0 (default) */
+  int   core3; /* 1 = потоки задач и фон и на ядре 3, если его открыл NPDM (default) */
+  int   gl_program_cache; /* 0 = кэш выкл., 1 = бинарники Unity + код nvc0 (default), 2 = + GLSL-кэш Mesa */
+  int   fps_limit; /* 0 = лимит из настроек игры (default; «выкл» = без лимита), 30..1000 = свой */
+  int   autoaim_every; /* поиск цели автоприцела раз в N кадров (1 = каждый, default 2) */
+  int   sky_every; /* небо Лимбо: 1 = каждый кадр, 2 = через кадр, 0 = через кадр, пока FPS ниже 90 (default) */
+  int   physics_solver; /* итерации решателя PhysX для новых тел, 0 = как в проекте (6); default 4 */
+  int   physics_sync; /* 1 = синхронизация физики перед фазами скриптов вместо autoSyncTransforms (default) */
+  int   reproject; /* 1 = вставка кадров, повёрнутых по камере, при FPS ниже 60 (прототип, default) */
+  int   ui_language; /* 1 = English (default), 0 = system, 2..14 = translations */
+  int   ui_language_revision; /* one-time migration of the old automatic default */
     int   saltynx; /* optional direct NX-FPS shared-memory producer */
   int loading_boost; /* Horizon FastLoad during startup / scene loads, timeout 60s */
   int   fsr; /* experimental spatial EASU+RCAS, requires managed bridge + bundle */
+  int   fsr3; /* experimental temporal FSR 3.1, selected independently of filter enable */
+  int   fg_probe; /* one-shot GLES/deko bring-up callback, NOT frame generation */
+  int   frame_generation;
+  int   spawn_warmup;
   float fsr_sharpness; /* RCAS attenuation stops: 0 strongest, 2 weakest */
 } Config;
 

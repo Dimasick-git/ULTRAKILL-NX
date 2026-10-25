@@ -1,0 +1,4 @@
+Tool: built-in image_gen, image edit.
+Input: forwarder/icon-art-reference.png
+
+Edit target: the supplied ULTRAKILL square icon. Create a Nintendo Switch HOME forwarder icon, square 1024x1024. Preserve the original robot V1, its pose, blue armor, red circular backdrop and bright yellow rays, dark surrounding background, and overall composition faithfully. Change the bottom title area to read exactly 'ULTRAKILL - NX' using the original aggressive block-letter ULTRAKILL styling, red letters with dark outline; make it readable on a 256px icon. Add the exact credit 'Dimasick-git' in a small but crisp light gray sans-serif line at bottom right underneath the title with enough bottom margin. Keep the credit visibly smaller than the title. Do not add any other text, logos, borders or mockup. Deliver only the final flat square icon.

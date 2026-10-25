@@ -26,12 +26,14 @@ import argparse
 import array
 import gc
 import struct
+import os
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import lz4.block  # noqa: E402
 import glsl_es  # noqa: E402
 import lean_tt  # noqa: E402

@@ -4,6 +4,7 @@ from pathlib import Path
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--cc', default='gcc')
+    ap.add_argument('--cc-arg',action='append',default=[])
     args = ap.parse_args()
     header = Path(__file__).resolve().parents[1] / 'loader/source/nx_log_repeat.h'
     source = '#include <assert.h>\n' + header.read_text() + r'''
@@ -23,7 +24,7 @@ int main(void) {
 '''
     with tempfile.TemporaryDirectory() as tmp:
         c = Path(tmp)/'test.c'; exe = Path(tmp)/'test.exe'; c.write_text(source)
-        subprocess.run([args.cc, '-std=c11', '-Wall', '-Wextra', str(c), '-o', str(exe)], check=True)
+        subprocess.run([args.cc, *args.cc_arg, '-std=c11', '-Wall', '-Wextra', str(c), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     print('PASS: initial samples, repeat counts, interval, changed and long errors')
 

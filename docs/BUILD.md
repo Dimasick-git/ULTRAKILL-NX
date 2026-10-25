@@ -8,6 +8,12 @@ Unity-проект игры, ключи консоли и готовые биб�
 Другая версия движка требует повторного вывода и проверки смещений.
 Полностью автоматического сценария одной командой пока нет.
 
+Для r83 сначала подготовьте 13 TSV-таблиц и Android-бандл шрифта по
+[инструкции локализации](LOCALIZATION.md). `stage_full_game.py` принимает
+`--language-dir`, `--font-bundle`, `--font-license`; при `--version r83`
+таблицы всех 13 переводов, CJK-бандл и его лицензия обязательны.
+Упаковщик полного NSP повторно проверяет их наличие.
+
 ## Загрузчик
 
 Нужны devkitA64/libnx и portlibs: SDL2, Mesa, nouveau, libpng, zlib, libjpeg-turbo.
@@ -105,7 +111,7 @@ python tools/test_mouse_scroll.py path/to/Source/il2cppOutput/Assembly-CSharp__1
 NullCheck сохраняются. Метаданные этого исправления не меняются; смещения
 из нового libil2cpp.sym.so всё равно нужно вывести заново.
 
-## Полный установщик NSP (r36)
+## Полный установщик NSP (2.0.0 TEST1 / r37)
 
 Перед экспортом один раз примените `tools/patch_switch_prompts.ps1` к локальной
 `Assets/Plugins/Assembly-CSharp.dll`. Параметры: `-Assembly` — этот DLL,
@@ -114,10 +120,15 @@ NullCheck сохраняются. Метаданные этого исправл
 Инструмент сохраняет резервную копию, проверяет структуру метода и допускает
 повторный запуск. Изменённый DLL игры в Git не добавляется.
 
-`NxTouchCheck.Export` сначала проверяет реальные UI-кнопки, drag, отмену,
+`NxFsr3Build.Export` сначала проверяет реальные UI-кнопки, drag, отмену,
 масштабирование координат, затем запускает проверки FSR/геймпада и экспорт.
 `NxInputCheck` проверяет подсказки на настоящем resolver игры, включая remap.
-После экспорта обязательны обычные патчи GC/exception/nullcheck/mouse и сборка IL2CPP.
+После экспорта обязательны обычные патчи GC/exception/nullcheck/mouse. Для
+диагностической TEST1 также применяется `tools/patch_cpu_scopes.py` к каталогу
+`Il2CppOutputProject/Source/il2cppOutput`, затем собирается IL2CPP. Это RAII-замеры
+восьми методов; ранние выходы и исключения сохраняют исходное поведение.
+Первый вызов включает разрешение адреса диагностического callback. Метрики
+измеряют включительное прошедшее время, а не независимые доли CPU.
 
 `tools/stage_full_game.py` объединяет неизменяемые Addressables/видео из полной
 рабочей сборки с новыми библиотеками, NRO и метаданными кода. Все стартовые
@@ -131,7 +142,12 @@ NullCheck сохраняются. Метаданные этого исправл
 новый `offsets.ini` и `assets/NxPort/boot-content.json` с контрольными суммами
 стартовых данных и метаданных. Упаковщик и проверка NSP сверяют этот манифест.
 Регрессионная проверка: `python tools/test_boot_overlay.py`. Параметры: `--base`, `--export`, `--nro`, `--output`,
-`--unity-log`, `--il2cpp-log`. Выходной каталог должен быть новым.
+`--native-elf` (ELF той же сборки NRO), `--unity-log`, `--il2cpp-log`.
+Выходной каталог должен быть новым. Инструмент сверяет build-id NRO/ELF
+и проверяет все undefined-имена библиотек по собранным таблицам адаптеров
+и экспортам загружаемых модулей; неразрешённые имена блокируют staging.
+Отдельный аудит: `tools/audit_imports.py --loader <loader.elf> --library <libmain.so>
+--library <libunity.so> --library <libil2cpp.so> --report <audit.json>`.
 
 `tools/package_full_nsp.py` принимает `--game` (этот каталог), `--support`
 (корень полного комплекта SaltyNX), `--keys` (локальный путь к ключам),
@@ -154,3 +170,107 @@ RomFS не допускает объединение файлов на перв�
 примените `tools/patch_hacbrewpack_buffer.py` к его `romfs.c` и пересоберите
 утилиту. Патч восстанавливает исходный размер рабочего буфера перед каждым
 файлом; содержимое payload не меняется и проверяется после сборки NSP.
+
+FSR 3.1 sources are embedded in `unity/Packages/fidelityfx.fsr`. Copy this package
+into the Unity project Packages folder. `NxFsr3Build.Export` builds both upscaler
+bundles and runs GPU/touch/input checks before Android export. Staging requires
+`--fsr-bundles <project>/Build/NxPortAndroid`; stale base bundles are atomically
+replaced. Keep the package MIT/AMD notices with binary distributions.
+
+After `patch_nullcheck_site.py`, apply `patch_bounds_site.py <IL2CPP>` before
+compile-cpp. It logs invalid array indices and caller offsets, preserving the
+original exception. Run `test_bounds_site.py --cxx g++` for its host checks.
+
+
+### r38: startup collector safety
+
+The r37 console log stalls twice at frames 190/192 while starting the intro,
+before the composition upscaler binds. The watchdog cannot acquire the GC
+snapshot gate. This identifies an in-progress collection, but the old diagnostic
+cannot locate the collector's blocked instruction.
+
+The native bridge now acquires the recursive newlib allocator lock before
+suspending mutators and releases it after resuming them, including failure
+unwind. Collector log messages use a separate bounded buffer and are merged only
+after resume; no collector log or explicit flush waits on a suspended producer.
+The watchdog can snapshot only the collector without resuming GC-owned mutators.
+Host checks cover the ordering, unwind, snapshot failure, and collector logging
+while the ordinary queue is locked. These checks do not prove Switch startup;
+r38 remains a console test candidate. No timing, game code or FSR shader change
+is included in r38 relative to r37.
+
+
+### r39: remove shared pthread initialization lock
+
+r38 feedback still stalls before the intro renders. The collector snapshot is
+phase 2, PC `svcArbitrateLock`, LR `mutexLock`. Its allocator gate was already
+acquired, so the allocator-only fix did not resolve the startup stall.
+
+The Android mutex/condition adapters previously acquired `g_sync_init_lock` on
+every operation, including unlock of already initialized objects. If GC paused
+that lock's owner, the collector could not use its own unrelated locks. Mutexes,
+conditions and rwlocks now resolve backing objects through an address registry:
+initialized lookup does not lock or allocate; concurrent first use publishes a
+fully initialized candidate with CAS and disposes losing candidates. Another
+thread never waits for an initializing owner. Guest storage uses 32-bit accesses
+because Bionic objects can be only four-byte aligned. Small registry address
+records remain until process exit to permit readers without reclamation locks;
+native backing objects are destroyed normally and address reuse shares a record.
+
+The Horizon Boehm callbacks already pause/resume synchronously. They now bypass
+POSIX signal ACK posts, waits and retry barriers; normal Android keeps them.
+`test_sync_registry.py` exercises a parked allocator/creator, eight competing
+publishers, collisions, 50,000 addresses, destruction/reuse, OOM and the actual
+mutex/condition/rwlock adapters. `test_gc_sync_ack.py --source <exported
+pthread_stop_world.c>` compiles the actual Boehm suspend/restart/barrier code and
+checks both backends, including a negative control for the old ACK path.
+Collector-only mutex tracing records the pending lock, caller and owner handle.
+These are host checks. Switch startup remains a separate acceptance test.
+
+
+### r40: confirmed futex bucket deadlock
+
+The r39 console log identifies the collector's pending mutex and caller:
+`NRO+0x142fc`, resolved with the matching native ELF to `futex_impl` line 194,
+the `FUTEX_WAKE` branch. The collector had paused the bucket mutex's owner, so
+its wake operation could never acquire the bucket. Earlier synchronization fixes
+did not remove this specific bucket dependency.
+
+Raw futex wait/wake now uses Horizon `svcWaitForAddress(WaitIfEqual)` and
+`svcSignalToAddress(Signal)`, with no userspace bucket or mutex. The kernel
+combines the value comparison and sleep. Both SVCs are already permitted by the
+actual launcher NPDM; no launcher policy change is needed. The existing 16 ms
+poll bound remains, with capped waits returning a permitted spurious wake. Short
+deadline expiry maps to ETIMEDOUT, a changed value to EAGAIN, cancellation to
+EINTR, and invalid memory to EFAULT. WAIT uses a relative timeout; WAIT_BITSET
+uses an absolute monotonic/realtime deadline. The old bitset broadcast and
+approximate wake-count behavior are retained. See the Linux man-pages project
+[FUTEX_WAIT](https://man7.org/linux/man-pages/man2/FUTEX_WAIT.2const.html) and
+[FUTEX_WAIT_BITSET](https://man7.org/linux/man-pages/man2/FUTEX_WAIT_BITSET.2const.html).
+
+`test_futex_kernel.py` compiles the actual shim with a poisoned userspace mutex.
+It exercises wake, atomic value changes before sleep, timeout clocks, overflow,
+error mapping and balanced diagnostics, and checks SVC 0x34/0x35 in the binary
+NPDM. `--legacy-source <r39 libc_shim.c>` supplies the negative control: the exact
+old wake branch must fail on the mutex that the console log identified.
+This is a native-only patch; the r39 IL2CPP build and all game/upscaler resources
+are unchanged. Host checks pass; Switch startup remains to be confirmed.
+
+## ПК с 8 ГБ ОЗУ
+
+Запускай экспорт Unity, компиляцию IL2CPP и упаковку последовательно.
+Для Unity используется `-job-worker-count 1`. После закрытия Unity запускается
+инкрементальная компиляция C++ с `--jobs=1` или `--jobs=2`, в зависимости от
+свободной памяти. Несколько редакторов Unity одновременно не нужны.
+Каталог кэша IL2CPP сохраняется между сборками; при обычных изменениях повторно
+компилируются затронутые файлы. Изменение состава generic-типов может потребовать
+более широкой пересборки. Число потоков лучше выбирать до её начала.
+
+Упаковщик обрабатывает игровые данные потоком: полный NSP не загружается
+в ОЗУ целиком. Поэтапная сборка всё равно даёт один установочный файл.
+
+Для повторных экспортов `tools/reuse_codegen_comments.py` может сохранить
+исходники C++, когда изменились только служебные номера Method Definition Index
+в комментариях IL2CPP. Проверяется полное совпадение остального кода; файлы
+метаданных и регистрации исключены. Инструмент запускается после `patch_all.py`.
+Это позволяет сохранить объектный кэш без подмены кода или таблиц метаданных.

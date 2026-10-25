@@ -11,8 +11,10 @@ import argparse
 import ctypes
 import ctypes.wintypes
 import gc
+import os
 import sys
 
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import UnityPy  # noqa: E402
 
 

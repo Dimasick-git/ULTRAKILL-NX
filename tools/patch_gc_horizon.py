@@ -32,10 +32,34 @@ static void nx_gc_bridge_setup(void) {
 }
 '''
 
+def synchronous_ack(text):
+    marker = 'NX_GC_SYNCHRONOUS_ACK'
+    if marker in text:
+        return text
+    edits = [
+        ('                  sem_post(&GC_suspend_ack_sem);',
+         '                  /* Horizon pause is synchronous: no signal ACK semaphore. */'),
+        ('                sem_post(&GC_suspend_ack_sem);',
+         '                /* Horizon resume is synchronous too. */'),
+        ('static void suspend_restart_barrier(int n_live_threads)\n{',
+         'static void suspend_restart_barrier(int n_live_threads)\n{\n    /* NX_GC_SYNCHRONOUS_ACK: kernel callbacks already completed the operation. */\n    if (nx_gc_bridge_state == 1) return;'),
+        ('\n                               int (*suspend_restart_all)(void))\n{',
+         '\n                               int (*suspend_restart_all)(void))\n{\n    if (nx_gc_bridge_state == 1) return n_live_threads;'),
+        ('\n                                          int (*suspend_restart_all)(void))\n{',
+         '\n                                          int (*suspend_restart_all)(void))\n{\n    if (nx_gc_bridge_state == 1) return;'),
+    ]
+    for old, new in edits:
+        if text.count(old) != 1:
+            raise ValueError(f'Unexpected synchronous ACK anchor: {text.count(old)} {old}')
+        text = text.replace(old, new, 1)
+    return text
+
 def patch(path):
     text=path.read_text(encoding='utf-8')
     if 'Horizon STW bridge ABI 1' in text:
-        print('Already patched:',path);return
+        updated = synchronous_ack(text)
+        if updated != text: path.write_text(updated, encoding='utf-8')
+        print('Horizon synchronous ACK patch ready:',path);return
     replacements=[
         ('#include "private/pthread_support.h"', '#include "private/pthread_support.h"\n'+BRIDGE),
         ('              result = RAISE_SIGNAL(p, GC_sig_suspend);', r'''              if (nx_gc_bridge_state == 1) {
@@ -75,7 +99,7 @@ def patch(path):
         text=text.replace(old,new,1)
     backup=path.with_suffix(path.suffix+'.pre-nx-gc')
     if not backup.exists(): backup.write_bytes(path.read_bytes())
-    path.write_text(text,encoding='utf-8')
+    path.write_text(synchronous_ack(text),encoding='utf-8')
     print('Patched:',path)
 
 if __name__=='__main__':

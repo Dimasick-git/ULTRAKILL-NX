@@ -6,13 +6,15 @@ def function(code,name):
     return re.search(r'^[^\n;]*\b'+name+r'\([^\n]*\) \{.*?^}',code,re.M|re.S).group(0)
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--cc',default='gcc');args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--cc',default='gcc')
+    ap.add_argument('--cc-arg',action='append',default=[],help='compiler driver argument, e.g. cc for Zig')
+    args=ap.parse_args()
     source=Path(__file__).resolve().parents[1]/'loader/source'
-    gameroot=(source/'nx_gameroot.c').read_text()
-    bridge=(source/'nx_bridge.c').read_text()
-    config=(source/'config.c').read_text()
+    gameroot=(source/'nx_gameroot.c').read_text(encoding='utf-8')
+    bridge=(source/'nx_bridge.c').read_text(encoding='utf-8')
+    config=(source/'config.c').read_text(encoding='utf-8')
     config=re.sub(r'^#include "[^"\n]+"\n','',config,flags=re.M)
-    cfgtype=re.search(r'typedef struct \{.*?\} Config;', (source/'config.h').read_text(),re.S).group(0)
+    cfgtype=re.search(r'typedef struct \{.*?\} Config;', (source/'config.h').read_text(encoding='utf-8'),re.S).group(0)
     code=r'''
 #include <assert.h>
 #include <stdint.h>
@@ -20,6 +22,9 @@ def main():
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
+#ifdef NDEBUG
+#error Host tests require active assertions
+#endif
 static int g_installed=1;
 static char g_root[]="sdmc:/switch/ultrakill",g_root_unix[]="/switch/ultrakill";
 static void ensure(void){}
@@ -40,12 +45,28 @@ static float nx_render_sharpness(void){return observed_sharp;}
 static void nx_render_config_changed(void){render_changes++;observed_height=config.render_height;observed_filter=config.fsr;observed_sharp=config.fsr_sharpness;}
 static void nxb_loading(int active){if(!active)boost_ended++;}
 static void nx_loading_settings_changed(void){if(!config.loading_boost)nxb_loading(0);}
+static int nxb_fg_available(void){return 0;}
+static void nx_fg_settings_changed(void){}
 static const char *config_dest="config.txt";
 static void config_path(char *buf,size_t sz,const char *rel){(void)rel;snprintf(buf,sz,"%s",config_dest);}
 #define CONFIG_NAME "config.txt"
 #define game_path config_path
 ''' + function(bridge,'nxb_config_set') + r'''
 int main(void){
+ FILE *language_file=fopen("language-test.txt","w");assert(language_file);fclose(language_file);
+ assert(read_config("language-test.txt")>=0 && config.ui_language==1);
+ language_file=fopen("language-test.txt","w");assert(language_file);
+ fputs("ui_language 0\n",language_file);fclose(language_file);
+ assert(read_config("language-test.txt")>=0 && config.ui_language==1 && config.ui_language_revision==1);
+ language_file=fopen("language-test.txt","w");assert(language_file);
+ fputs("ui_language 0\nui_language_revision 1\n",language_file);fclose(language_file);
+ assert(read_config("language-test.txt")>=0 && config.ui_language==0);
+ language_file=fopen("language-test.txt","w");assert(language_file);
+ fputs("ui_language 2\n",language_file);fclose(language_file);
+ assert(read_config("language-test.txt")>=0 && config.ui_language==2);
+ language_file=fopen("language-test.txt","w");assert(language_file);
+ fputs("fsr 1\nfsr3 1\nframe_generation 1\nfg_probe 1\n",language_file);fclose(language_file);
+ assert(read_config("language-test.txt")>=0 && config.fsr==1 && !config.fsr3 && !config.frame_generation && !config.fg_probe);
  char result[512];
  const char *assets[]={"assets/bin/Data/globalgamemanagers","assets/aa/catalog.json","assets/VideosNX/intro.nxv","libil2cpp.so","offsets.ini"};
  for(unsigned i=0;i<sizeof assets/sizeof *assets;i++){
@@ -76,6 +97,7 @@ int main(void){
 
  config.gyro=1;config.render_height=540;config.fsr=1;config.gyro_sens=2;
  Config before=config;
+ assert(!nxb_config_set("fsr3",1));assert(!nxb_config_set("frame_generation",1));
  assert(!nxb_config_set("physics_hz",60));assert(!nxb_config_set("gyro",2));
  assert(!nxb_config_set("render_height",179));assert(!nxb_config_set("render_height",540.5f));
  assert(!nxb_config_set("gyro_sens",NAN));assert(!nxb_config_set("fsr_sharpness",INFINITY));
@@ -92,8 +114,8 @@ int main(void){
 '''
     with tempfile.TemporaryDirectory() as tmp:
         src=Path(tmp)/'test.c';exe=Path(tmp)/'test.exe';src.write_text(code,encoding='utf-8')
-        subprocess.run([args.cc,'-std=c11','-O2','-Wall',str(src),'-o',str(exe)],check=True)
+        subprocess.run([args.cc,*args.cc_arg,'-std=c11','-O2','-UNDEBUG','-Wall',str(src),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],cwd=tmp,check=True)
-    print('PASS: primary finger identity/release, installed assets vs writable saves, validated settings, disk persistence, failure rollback')
+    print('PASS: English default/migration, explicit language retention, touch release, installed paths, validated settings, persistence and failure rollback')
 
 if __name__=='__main__':main()

@@ -28,6 +28,11 @@ MAIN=r'''
 int main(void){
  uint64_t mask[2]={~0ull,~0ull};
  nx_cpu_init();assert(nx_cpu_count()==3&&nx_cpu_allowed_mask()==7);
+ nx_cpu_thread_named(3,"UnityGfxDeviceWorker");assert(thread_mask==6);
+ nx_cpu_thread_named(3,"Job.Worker 1");assert(thread_mask==6);
+ thread_mask=1;nx_cpu_thread_named(3,"UnityMain");assert(thread_mask==1);
+ nx_cpu_thread_named(3,"FMOD mixer thread");assert(thread_mask==1);
+ thread_mask=7;
  assert(!strcmp(nx_cpu_list(),"0,1,2\n"));assert(!strstr(nx_cpu_info(),"processor\t: 3"));
  assert(nx_sched_getaffinity(0,sizeof(mask),mask)==0&&mask[0]==7&&mask[1]==0);
  assert(nx_sched_getaffinity(77,sizeof(mask),mask)==0);
@@ -43,9 +48,11 @@ int main(void){
  assert(strstr(nx_cpu_info(),"processor\t: 3"));mask[0]=8;
  assert(nx_sched_setaffinity(0,sizeof(mask),mask)==0&&thread_mask==8);
  permitted=5;nx_cpu_init();assert(nx_cpu_count()==2&&!strcmp(nx_cpu_list(),"0,2\n"));
+ nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==4);
+ permitted=1;nx_cpu_init();thread_mask=1;nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==1);
  fail_info=1;thread_mask=2;nx_cpu_init();assert(nx_cpu_count()==1&&nx_cpu_allowed_mask()==2);
  fail_thread=1;nx_cpu_init();assert(nx_cpu_allowed_mask()==2);
- puts("PASS: real affinity adapter, allowed 3/4/sparse cores, zero-filled masks, target lookup, errors and conservative fallback");
+ puts("PASS: real affinity adapter, allowed cores, main-core isolation, sparse/single-core fallback and errors");
 }
 '''
 def main():

@@ -25,9 +25,6 @@ static int limited_height(int percent) {
 static void defaults(void) {
   if (height) return;
   height=config.render_height;filter=config.fsr;sharpness=config.fsr_sharpness;
-}
-void nx_render_shared_init(void *region) {
-  defaults();
   /* Honor this title's persisted external request when it differs from its
    * disabled/100% template; otherwise retain the tested game profile. */
   FILE *f=fopen("sdmc:/SaltySD/plugins/FSR/01005CE3B1A40000.ini","r");
@@ -44,6 +41,9 @@ void nx_render_shared_init(void *region) {
       height=limited_height(scale);filter=on!=0;sharpness=stops;
     }
   }
+}
+void nx_render_shared_init(void *region) {
+  defaults();
   shared=region;live=(void*)((char*)region+sizeof(*shared));
   memset(region,0,sizeof(*shared)+sizeof(*live));
   shared->version=3;shared->sharpness=sharpness;shared->status=1;

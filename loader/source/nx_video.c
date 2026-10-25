@@ -261,7 +261,7 @@ void nxb_video_texture(int handle, uint32_t gc_handle) {
 
 /* The real Android decoder does not exist on Horizon. Returning NULL is the
  * documented allocation failure, which Unity handles; leaving a poisoned PLT
- * entry caused the instruction abort in r19 before our managed replacement ran. */
+ * entry caused an instruction abort before our managed replacement ran. */
 void *nx_media_extractor_unavailable(void) {
   static int logged;
   if (!logged++) debugPrintf("[video] Android extractor unavailable; using NX software player\n");

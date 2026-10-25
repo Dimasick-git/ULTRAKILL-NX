@@ -18,6 +18,10 @@ namespace NxPort
             var go = new GameObject("NxPort");
             go.hideFlags = HideFlags.HideAndDontSave;   // смена сцены его не уничтожит
             Object.DontDestroyOnLoad(go);
+            go.AddComponent<NxPerformance>();
+            go.AddComponent<NxSpawnWarmup>();
+            go.AddComponent<NxFrameTimings>();
+            go.AddComponent<NxLoopTimings>();
             go.AddComponent<NxGamepad>();
             go.AddComponent<NxTouch>();
             go.AddComponent<NxSoftKeyboard>();
@@ -27,6 +31,7 @@ namespace NxPort
             go.AddComponent<NxWeaponSlots>();
             go.AddComponent<NxFsr>();
             go.AddComponent<NxGyroAim>();
+            go.AddComponent<NxLocalization>();
 
             NxBridge.Log($"слой порта поднят: gyro={NxBridge.ConfigInt("gyro")} " +
                          $"sens={NxBridge.ConfigFloat("gyro_sens"):0.00}");

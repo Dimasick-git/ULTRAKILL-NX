@@ -14,12 +14,17 @@ def main():
 #include <stdio.h>
 #include <math.h>
 static struct {int render_height,fsr;float fsr_sharpness;} config={540,1,.5f};
-static FILE* no_config(const char* a,const char* b){(void)a;(void)b;return NULL;}
+static const char* persisted_config;
+static FILE* no_config(const char* a,const char* b){(void)a;(void)b;if(!persisted_config)return NULL;FILE* f=tmpfile();assert(f);fputs(persisted_config,f);rewind(f);return f;}
 #define fopen no_config
 #define debugPrintf(...) ((void)0)
 '''
     test=r'''
 int main(void){
+ persisted_config="enabled=1\nscale=50\nsharpness=0.7\n";
+ assert(nx_render_height()==360 && nx_render_filter()==1 && nx_render_sharpness()==.7f && !shared);
+ // Persisted title settings must work even if SaltySD is unavailable.
+ height=0;persisted_config=NULL;
  uint32_t region[(128+24)/4]={0};nx_render_shared_init(region);
  assert(offsetof(NxFsrShared,sharpness)==8 && offsetof(NxFsrShared,scale_percent)==124);
  assert(shared->magic==0x31525346 && live->magic==0x43525346 && live->active==5);

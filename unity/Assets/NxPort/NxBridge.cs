@@ -61,6 +61,8 @@ namespace NxPort
         [DllImport(Lib)] static extern float nxb_config_float(string key);
         [DllImport(Lib)] static extern void nxb_log(string msg);
         [DllImport(Lib)] static extern void nxb_loading(int active);
+        [DllImport(Lib)] static extern uint nxb_memory_trim(int request);
+        [DllImport(Lib)] static extern uint nxb_render_faults();
         [DllImport(Lib)] static extern void nxb_fsr_applied(int width, int height, int outputWidth, int outputHeight, int active);
 
         static int s_state; // 0 не проверяли, 1 есть, -1 нет
@@ -88,6 +90,8 @@ namespace NxPort
         public static bool SetConfig(string key, float value) => Available && nxb_config_set(key, value) != 0;
         public static bool Motion(ref NxbMotion m) => Available && nxb_motion(ref m) != 0;
         public static int ConfigInt(string key) => Available ? nxb_config_int(key) : 0;
+        public static uint MemoryTrim(bool request) => Available ? nxb_memory_trim(request ? 1 : 0) : 0;
+        public static uint RenderFaults() => Available ? nxb_render_faults() : 0;
         public static float ConfigFloat(string key) => Available ? nxb_config_float(key) : 0f;
         public static void Loading(bool active) { if (Available) nxb_loading(active ? 1 : 0); }
         public static void FsrApplied(int w, int h, int ow, int oh, bool active)

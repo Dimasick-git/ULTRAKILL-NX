@@ -1,51 +1,28 @@
 # Авторы и зависимости
 
-## Команда проекта
-
-- **[Dimasick-git](https://github.com/Dimasick-git)** — порт, интеграция, управление, гироскоп, видеоплеер и тестирование.
-- **[Ryazhenka-helper-01 / Zeropaxy](https://github.com/Ryazhenka-helper-01)** — главный тестер, скриншоты и видео для проекта.
-
-## Оригинальная игра
-
-- **[Arsi “Hakita” Patala](https://twitter.com/HakitaDev) / [New Blood Interactive](https://newblood.games/)** — авторы оригинальной [ULTRAKILL в Steam](https://store.steampowered.com/app/1229490/ULTRAKILL/).
-
-Оригинальная игра и её материалы не являются частью лицензий этого репозитория. См. [правовую информацию](docs/LEGAL.md).
-
-## Загрузчик и Nintendo Switch
-
-- **[ChanseyIsTheBest](https://github.com/ChanseyIsTheBest)** — базовая линия Unity/Android-загрузчика из порта Papers, Please.
-- **[TheOfficialFloW](https://github.com/TheOfficialFloW)** и **[fgsfds](https://github.com/fgsfds)** — so-loader и связанная инфраструктура.
-- **[nx-hbloader](https://github.com/switchbrew/nx-hbloader)** — основа HOME-forwarder.
-- **[devkitPro/libnx](https://github.com/devkitPro/libnx)** — библиотека Nintendo Switch homebrew.
-- **[Mesa](https://gitlab.freedesktop.org/mesa/mesa)** и **[nouveau](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/gallium/drivers/nouveau)** — графический стек GLES.
-- **[SaltyNX](https://github.com/shinyquagsire23/SaltyNX)** и **[NX-FPS](https://github.com/masagrator/NX-FPS)** — протокол и инструменты для моста телеметрии кадров.
-
-## Сторонние библиотеки
-
-- **[SDL2](https://github.com/libsdl-org/SDL)** — ввод и платформенная поддержка.
-- **[libpng](https://github.com/pnggroup/libpng)** — работа с PNG.
-- **[zlib](https://github.com/madler/zlib)** — сжатие данных.
-- **[libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo)** / **[Independent JPEG Group](https://jpegclub.org/)** — декодирование кадров видео.
-- **[Boehm GC / BDWGC](https://github.com/ivmai/bdwgc)** — сборщик мусора; оригинальные уведомления сохранены в патче и сборке.
-- **[AMD FidelityFX FSR 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR)** и **[GPUOpen](https://gpuopen.com/fidelityfx-superresolution/)** — EASU/RCAS и вспомогательные заголовки, лицензия MIT.
-
-## Инструменты подготовки
-
-- **[AssetRipper](https://github.com/AssetRipper/AssetRipper)** — извлечение и анализ Unity-данных.
-- **[VanityReprised](https://github.com/eternalUnion/VanityReprised)** — подготовка игровых ресурсов.
-- **[UnityPy](https://github.com/K0lb3/UnityPy)** — чтение Unity-ассетов и бандлов.
-- **[HLSLcc](https://github.com/Unity-Technologies/HLSLcc)** — преобразование шейдеров.
-- **[FFmpeg](https://github.com/FFmpeg/FFmpeg)** — подготовка видео.
+- **Dimasick-git** — порт, интеграция, управление, гироскоп, видеоплеер и тестирование.
+- **[Ryazhenka-helper-01 (Zeropaxy)](https://github.com/Ryazhenka-helper-01)** — **главный тестер**, автор скриншотов и видео для проекта.
+- **Arsi “Hakita” Patala / New Blood Interactive** — оригинальная ULTRAKILL.
+- **ChanseyIsTheBest** — базовая линия Unity/Android загрузчика из порта Papers, Please.
+- **Andy Nguyen (TheOfficialFloW), fgsfds** — so-loader и связанная инфраструктура.
+- **nx-hbloader authors** — основа HOME-форвардера.
+- **devkitPro/libnx, Mesa/nouveau, SDL2, libpng, zlib** — платформа и библиотеки.
+- **Jorrit Rouwe / Jolt Physics contributors** — библиотека для нативного слоя физики в разработке; [MIT](native/licenses/JoltPhysics.txt).
+- **masagrator / SaltyNX contributors** — протокол NX-FPS/shared memory для прямого моста NRO.
+- **AMD / GPUOpen, Michal Drobot** — FidelityFX FSR1 и вспомогательные заголовки, MIT.
+- **Boehm GC contributors** — сборщик мусора; оригинальные уведомления сохранены в патче и сборке.
+- **libjpeg-turbo / Independent JPEG Group** — декодирование кадров видео.
+- **Noto CJK contributors / Google / Adobe** — шрифт CJK; [SIL OFL 1.1](https://github.com/notofonts/noto-cjk/blob/main/Sans/LICENSE).
+- Новые переводы 12 языков подготовлены с Google Translate, Argos Translate,
+  OpenCC (недостающие традиционные китайские строки) и словарями терминов;
+  это машинные черновики с частичной вычиткой. Полная проверка носителями языка впереди.
+- **AssetRipper / VanityReprised, HLSLcc, UnityPy, FFmpeg** — подготовка данных.
 
 This software is based in part on the work of the Independent JPEG Group.
 
-## Лицензии
+Лицензии: [загрузчик](LICENSE.loader), [форвардер](forwarder/LICENSE.md).
+Исходные уведомления об авторстве сохранены. Эти лицензии не распространяются
+на ULTRAKILL, Unity или сторонние материалы и библиотеки.
 
-- [Лицензия загрузчика](loader/LICENSE.md)
-- [Лицензия forwarder](forwarder/LICENSE.md)
-- [Лицензия AMD FidelityFX FSR 1](unity/Assets/NxPort/Fsr/Vendor/README.md)
-- [Карта лицензий](LICENSE.md)
-
-Лицензии и уведомления сторонних компонентов находятся рядом с соответствующими файлами. Они не распространяются на ULTRAKILL и его материалы.
-
-Скриншоты и видеоматериалы для проекта предоставлены участниками команды тестирования. Иконка использует изображение V1 из ULTRAKILL; оформление ULTRAKILL — NX подготовлено специально для порта.
+Скриншоты и видео проекта подготовлены Dimasick-git и Ryazhenka-helper-01 / Zeropaxy. Иконка использует изображение V1 из ULTRAKILL;
+оформление ULTRAKILL - NX подготовлено для порта.

@@ -80,8 +80,20 @@ public static class NxTouchCheck
                 Require(mapped == new Vector2(640, 360), "FSR render texture coordinates reach far edge");
             }
             finally { UnityEngine.Object.DestroyImmediate(cameraGo); UnityEngine.Object.DestroyImmediate(texture); }
+            // Original game MonoBehaviours cannot be instantiated in this recovered
+            // editor project. Exercise the real private type's event ABI without
+            // activating game singletons; world terminal routing needs a device run.
+            var terminalType = typeof(ShopButton).Assembly.GetType("ControllerPointer", true);
+            var terminal = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(terminalType);
+            var pressed = new UnityEngine.Events.UnityEvent(); int terminalClicks = 0;
+            pressed.AddListener(() => terminalClicks++);
+            terminalType.GetField("onPressed", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(terminal, pressed);
+            Require(ReferenceEquals(NxTouchModule.TerminalPressEvent(terminal), pressed), "real terminal event property bridge");
+            NxTouchModule.TerminalPressEvent(terminal).Invoke();
+            Require(terminalClicks == 1 && NxTouchModule.TerminalPressEvent(null) == null && NxTouchModule.TerminalPressEvent(new object()) == null,
+                "terminal event invoked once; missing/wrong target ignored");
             Require(!module.IsModuleSupported() && !module.ShouldActivateModule(), "original gamepad navigation module stays active");
-            Debug.Log("[nxtouch-test] PASS: tap, release outside, cancellation, disabled button, slider drag, scroll drag, FSR coordinate mapping, navigation isolation");
+            Debug.Log("[nxtouch-test] PASS: tap, release outside, cancellation, disabled button, slider drag, scroll drag, FSR coordinate mapping, terminal event ABI, navigation isolation");
         }
         finally { RaycasterManager.GetRaycasters().Remove(root.GetComponent<GraphicRaycaster>()); UnityEngine.Object.DestroyImmediate(root); UnityEngine.Object.DestroyImmediate(events); UnityEngine.Object.DestroyImmediate(renderCamera); }
     }

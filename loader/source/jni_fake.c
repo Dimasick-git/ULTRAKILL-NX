@@ -1,4 +1,7 @@
-/* jni_fake.c -- fake JNI environment for the MVGL engine (libcrx.so)
+/* jni_fake.c -- fake JNI environment (JavaVM / JNIEnv) for the game's Android
+ * libraries. Built on the base loader's (cr3_nx) implementation; Unity and
+ * input classes are delegated to unity_jni.c / unity_input.c, the remaining
+ * handlers answer the generic Android/Java queries.
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -371,26 +374,16 @@ static juint mov_int(const FakeID *id, va_list va) {
 
 // --- MyNativeActivity / general activity ------------------------------------
 
-// the in-archive base name the engine appends ".android.mvgl" to. "10007" is
-// the APK versionCode, matching the shipped main.10007.android.mvgl.
+// OBB/asset-pack name getters below are answered for completeness (the base
+// loader's engine mounted archives by these names); Unity never asks for them.
 #define MAIN_OBB_BASE "main.10007"
 
 const char *nx_resolved_language(void);
 static const char *lang_code(void) {
-  /* Follows the Switch system language, mapped onto the sixteen this build
-   * ships (the filenames in assets/loc/). There is deliberately no config knob:
-   * the game has its own in-game language selector, and a second setting in
-   * config.txt would only be a way for the two to disagree.
-   *
-   * This value is what Locale.getDefault() reports, i.e. the INITIAL choice on a
-   * fresh save. Whatever the player picks in-game afterwards wins.
-   *
-   * Two of the shipped codes are not plain ISO 639-1 and a reasonable guess gets
-   * them wrong: Portuguese is "pt-BR" and Ukrainian is "ukr". Czech, Basque,
-   * Indonesian, Polish and Turkish ship too but are not Switch system languages,
-   * so they are only reachable from the in-game menu. Dutch IS a Switch language
-   * but the game does not ship it, so it lands on English rather than on a file
-   * that is not there. */
+  /* What Locale.getDefault() reports: the Switch system language as a plain
+   * code. ULTRAKILL itself is English-only and ignores it; the port's text
+   * languages are chosen by ui_language (0 = follow the system, see
+   * system_language() in nx_bridge.c). */
   u64 lc = 0;
   SetLanguage sl = SetLanguage_ENUS;
   if (R_SUCCEEDED(setGetSystemLanguage(&lc)) &&
@@ -498,9 +491,7 @@ static void *act_object(const FakeID *id, va_list va) {
   if (name_has(id->name, "VersionName")) return jni_make_string("2.1.6");
   if (name_has(id->name, "PackageName")) return jni_make_string(GAME_PACKAGE);
   if (name_has(id->name, "DeviceModel")) return jni_make_string("Switch");
-  // archive name getters: the engine builds "<dir>/<name>.android.mvgl" for 5
-  // slots (main + patch + 3 asset packs). We map them to the 5 shipped archives
-  // (main.10007 + the four CRDB media DBs) so all of them mount.
+  // archive name getters, kept from the base loader (see MAIN_OBB_BASE).
   if (name_has(id->name, "ObbMainFileName"))  return jni_make_string(MAIN_OBB_BASE);
   if (name_has(id->name, "ObbPatchFileName")) return jni_make_string("CRDBbgm");
   if (name_has(id->name, "AssetPack1"))       return jni_make_string("CRDBvoice");
@@ -571,6 +562,15 @@ static void *act_object(const FakeID *id, va_list va) {
 }
 
 static juint act_int(const FakeID *id, va_list va) {
+  /* SDL/Horizon owns hardware volume. Expose a full-volume virtual Android
+   * music stream so Unity does not multiply PCM by our old default zero.
+   * requestAudioFocus must report GRANTED (1), not FAILED (0). */
+  if (name_has(id->cls, "media/AudioManager")) {
+    if (!strcmp(id->name, "getStreamVolume") || !strcmp(id->name, "getStreamMaxVolume")) return 15;
+    if (!strcmp(id->name, "requestAudioFocus")) return 1;
+    if (!strcmp(id->name, "isStreamMute")) return 0;
+  }
+
   // java.lang.Integer.parseInt(String[,radix]) / Long.parseLong: FMOD's audio
   // path parses getProperty()'s "48000"/"64" results through these. The old
   // act_int fall-through returned 0 -> framesPerBuffer parsed to 0 -> FMOD's
@@ -595,11 +595,8 @@ static juint act_int(const FakeID *id, va_list va) {
   // The other Google check whose default (0 == ConnectionResult.SUCCESS) wrongly
   // means "Play Services available": isGooglePlayServicesAvailable(). Return
   // SERVICE_MISSING (1) so the Play Games plugin cleanly disables itself instead
-  // of trying to sign in against GMS that isn't there. This matters MORE for
-  // Papers, Please than it did for the base: this game genuinely ships Play
-  // Games (Google.Play.Games.dll / SocialWrapper.ApiGooglePlay), so the plugin
-  // is really present and really would try. Together with pp_social_stub.c this
-  // is what keeps a sign-in attempt from leaving a callback pending forever.
+  // of trying to sign in against GMS that isn't there, which could leave a
+  // callback pending forever.
   if (name_has(id->name, "isGooglePlayServicesAvailable")) return 1; /* ConnectionResult.SERVICE_MISSING */
   (void)va;
   // every other "is something open / clicked / ok" probe -> false/0
@@ -642,7 +639,7 @@ static void act_void(const FakeID *id, va_list va) {
 // top-level dispatch by class + return kind
 // ---------------------------------------------------------------------------
 
-/* Papers, Please port: delegate Unity/input classes to our modules */
+/* Unity/input classes are delegated to our modules */
 #include "unity_jni.h"
 #include "unity_input.h"
 
@@ -1731,7 +1728,7 @@ void fmod_audio_start(void) {
 
 static void *env_table[233];
 static void **env_table_ptr = env_table;
-/* Papers, Please port: accessors so unity_jni.c/unity_input.c can read into the
+/* Accessors so unity_jni.c/unity_input.c can read into the
  * (otherwise static) FakeString / FakePriArray without duplicating the structs. */
 void *jni_bytearray_data(void *arr, int *len_out) {
   FakePriArray *a = arr;

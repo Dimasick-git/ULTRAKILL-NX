@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse, subprocess, tempfile
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--cc',default='gcc');args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--cc',default='gcc');ap.add_argument('--cc-arg',action='append',default=[]);args=ap.parse_args()
     root=Path(__file__).resolve().parents[1]
     code=(root/'loader/source/nx_salty.c').read_text()
     code=code[code.index('static SharedMemory memory;'):]
@@ -25,7 +25,8 @@ static int limit_sets,resource_closes,deny_set;
 static int64_t session_limit,session_current;
 static uint64_t clock_now,display_hz;
 static int refresh_gets,refresh_sets,refresh_set_fail;
-void nx_render_shared_init(void* p){assert(p==area+312);}
+static uint64_t reserved_used;static void* last_control;
+void nx_render_shared_init(void* p){assert((unsigned char*)p>=area+4 && (unsigned char*)p+152<=area+4096);last_control=p;NxFsrShared *s=p;NxFsrLive *l=(void*)((char*)p+128);s->magic=0x31525346;s->version=3;strcpy(s->log,"Unity GLES backend:");l->magic=0x43525346;}
 #define InfoType_ResourceLimit 1
 #define INVALID_HANDLE 0
 #define LimitableResource_Sessions 4
@@ -57,11 +58,12 @@ static Result dispatch(Service* s,unsigned cmd,Params p) {
 }
 #define serviceDispatch(s,cmd,...) dispatch(s,cmd,(Params){__VA_ARGS__})
 static Result reserve(Service* s,unsigned cmd,uint64_t size,uint64_t* offset,Params p) {
- assert(s->handle==1 && cmd==6 && size==464 && p.in_send_pid);
- ++reservations;*offset=0;return 0;
+ assert(s->handle==1 && cmd==6 && (size==468 || size==156) && p.in_send_pid);
+ if(!reserved_used)memset(area+4,0,sizeof(area)-4);
+ ++reservations;*offset=reserved_used;reserved_used+=(size+3)&~3ULL;return 0;
 }
 #define serviceDispatchInOut(s,cmd,in,out,...) reserve(s,cmd,in,&out,(Params){__VA_ARGS__})
-static Result get_refresh(Service* s,int cmd,uint64_t* out,Params p){assert(s->handle==1 && cmd==10 && p.in_send_pid);*out=display_hz;++refresh_gets;return 0;}
+static Result get_refresh(Service* s,int cmd,uint64_t* out,Params p){assert(s->handle==1 && cmd==10 && p.in_send_pid);*out=area[1];++refresh_gets;return 0;}
 static Result set_refresh(Service* s,int cmd,uint64_t in,Params p){assert(s->handle==1 && cmd==11 && in==60 && p.in_send_pid);++refresh_sets;if(refresh_set_fail)return 77;display_hz=in;return 0;}
 #define serviceDispatchOut(s,cmd,out,...) get_refresh(s,cmd,&out,(Params){__VA_ARGS__})
 #define serviceDispatchIn(s,cmd,in,...) set_refresh(s,cmd,in,(Params){__VA_ARGS__})
@@ -75,20 +77,40 @@ static void serviceClose(Service* s) {s->handle=0;}
 '''
     tests=r'''
 static void reset(void) {
- block=0;memset(area,0,sizeof(area));unavailable=map_fail=connects=dispatches=reservations=closes=0;
- enabled=foreign_producer=limit_checked=false;attempts=0;retry_at=0;
+ block=0;shared_base=0;overlay_limit=0;memset(area,0,sizeof(area));unavailable=map_fail=connects=dispatches=reservations=closes=0;
+ enabled=foreign_producer=limit_checked=false;attempts=0;retry_at=0;reserved_used=0;last_control=0;
+ area[0]=0;area[1]=60;area[2]=0xA5;area[3]=0x5A;
  display_hz=60;refresh_gets=refresh_sets=refresh_set_fail=0;
  session_limit=32;session_current=3;limit_sets=resource_closes=deny_set=0;clock_now=1;
 }
 int main(void) {
- reset();nx_salty_init();assert(block==(void*)area && block->magic==0x465053 && block->active && block->api==2);
+ reset();nx_salty_init();assert(block==(void*)(area+4) && block->magic==0x465053 && block->active && block->api==2);
  assert(connects==1 && dispatches==2 && reservations==1 && closes==0);
+ assert(area[0]==0 && area[1]==60 && area[2]==0xA5 && area[3]==0x5A && !refresh_sets);
+ assert(last_control==area+316 && block->refresh==60);
+ for(int i=0;i<60;i++)nx_salty_present(1000000+i*320000);
+ assert(area[1]==60); // Present never overwrites cached display Hz with magic byte 0x50.
+ area[1]=75;nx_salty_present(30000000);assert(block->refresh==75 && !refresh_sets);
  reset();unavailable=1;nx_salty_init();assert(!block && !dispatches && !reservations);
  reset();map_fail=1;nx_salty_init();assert(!block && closes==1 && !reservations);
- reset();NxSaltyBlock* other=(void*)area;other->magic=0x465053;other->active=1;other->frame=999;
- nx_salty_init();assert(!block && !reservations && other->frame==999 && closes==1);
- reset();display_hz=80;nx_salty_init();assert(block && block->refresh==60 && refresh_gets==2 && refresh_sets==1);
- reset();display_hz=80;refresh_set_fail=1;nx_salty_init();assert(block && block->refresh==80 && refresh_sets==1);
+ reset();NxSaltyBlock* other=(void*)(area+4);other->magic=0x465053;other->active=1;other->frame=999;reserved_used=316;
+ nx_salty_init();assert(block==other && foreign_producer && reservations==1 && other->frame==999 && !closes);
+ nx_salty_present(1000000);assert(other->frame==999);
+ nx_salty_shutdown();assert(other->active==1);
+ reset();nx_salty_init();assert(reservations==1);block->frame=123;block->active=1;
+ block=0;attempts=0;nx_salty_init();assert(block==(void*)(area+4) && !foreign_producer && reservations==1 && block->frame==0);
+ nx_salty_shutdown();assert(!block->active && !enabled);
+ // Reproduce r90: FPS magic at offset 0 literally makes cmd10 return 80.
+ reset();NxSaltyBlock *legacy=(void*)area;legacy->magic=0x465053;legacy->api=2;legacy->active=1;
+ assert(area[1]==80);nx_render_shared_init(area+312);reserved_used=464;
+ nx_salty_init();assert(block==(void*)(area+468) && !foreign_producer && area[1]==0 && !refresh_sets);
+ assert(last_control==area+312);area[1]=60;nx_salty_present(1);assert(block->refresh==60);
+ block=0;attempts=0;nx_salty_init();assert(block==(void*)(area+468) && !foreign_producer && reservations==1);
+ reset();legacy=(void*)area;legacy->magic=0x465053;nx_render_shared_init(area+312);reserved_used=464;
+ area[1]=60; // sysmodule refreshed byte 1, leaving the rest of the old magic behind
+ nx_salty_init();assert(block==(void*)(area+468) && area[0]==0 && area[1]==0 && area[2]==0);
+ // Even a legitimate 80 Hz input is telemetry, never a reason to change hardware.
+ reset();area[1]=80;nx_salty_init();assert(block && block->refresh==80 && refresh_gets==1 && !refresh_sets);
  reset();unavailable=0x10801;session_limit=session_current=0;
  nx_salty_init();assert(block && connects==2 && limit_sets==1 && session_limit==8 && resource_closes==1);
  reset();unavailable=0x10801;nx_salty_init();assert(!block && !limit_sets && resource_closes==1);
@@ -98,15 +120,16 @@ int main(void) {
  nx_salty_init();assert(!block && limit_sets==1 && resource_closes==1);
  for(int i=0;i<50;i++){clock_now+=19200000;nx_salty_present(clock_now);}
  assert(connects==30 && attempts==30 && limit_sets==1 && !block);
- reset();nx_salty_present(999999999);assert(!connects); // saltynx 0 leaves bridge disabled
+ reset();nx_salty_present(999999999);assert(!connects);
  return 0;
 }
+
 '''
     with tempfile.TemporaryDirectory() as tmp:
         src=Path(tmp)/'session.c';exe=Path(tmp)/'session.exe'
         src.write_text(header+stubs+code+tests)
-        subprocess.run([args.cc,'-std=c11','-O2','-Wall','-Wextra',str(src),'-o',str(exe)],check=True)
+        subprocess.run([args.cc,*args.cc_arg,'-std=c11','-UNDEBUG','-O2','-Wall','-Wextra',str(src),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True)
-    print('PASS: SaltySD protocol, bounded exhausted-session repair, deferred retry/timeout, failure cleanup and foreign producer')
+    print('PASS: SaltySD header preserved; r90 false-80 reproduction and migration; independent refresh updates; no display writes; ownership, reuse and retries')
 
 if __name__=='__main__':main()

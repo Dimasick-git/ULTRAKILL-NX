@@ -42,6 +42,18 @@ JNI = {
     "unity.quality_shadows": "_Z38QualitySettings_Set_Custom_PropShadows28QualitySettingsShadowQuality",
     "unity.quality_aa": "_Z43QualitySettings_Set_Custom_PropAntiAliasingi",
     "unity.app_target_fps": "_Z42Application_Set_Custom_PropTargetFrameRatei",
+    "unity.app_get_target_fps": "_Z42Application_Get_Custom_PropTargetFrameRatev",
+    "unity.physics_reuse_callbacks": "_Z46Physics_Set_Custom_PropReuseCollisionCallbacksh",
+    "unity.physics_get_reuse_callbacks": "_Z46Physics_Get_Custom_PropReuseCollisionCallbacksv",
+    "unity.physics_solver_iterations": "_Z46Physics_Set_Custom_PropDefaultSolverIterationsi",
+    "unity.physics_get_solver_iterations": "_Z46Physics_Get_Custom_PropDefaultSolverIterationsv",
+    "unity.gc_is_incremental": "_Z45GarbageCollector_Get_Custom_PropIsIncrementalv",
+    "unity.physics_sync_transforms": "_Z29Physics_CUSTOM_SyncTransformsv",
+    "unity.physics_get_autosync": "_Z41Physics_Get_Custom_PropAutoSyncTransformsv",
+    "unity.physics_set_autosync": "_Z41Physics_Set_Custom_PropAutoSyncTransformsh",
+    "unity.gl_issue_plugin_event": "_Z18GLIssuePluginEventPvi",
+    "unity.camera_to_world": "_ZNK6Camera22GetCameraToWorldMatrixEv",
+    "unity.camera_projection": "_ZNK6Camera19GetProjectionMatrixEv",
     "unity.app_stacktrace": "_Z39Application_CUSTOM_SetStackTraceLogType7LogType17StackTraceLogType",
     "unity.screen_resolution": "_Z36Screen_CUSTOM_SetResolution_Injectedii14FullscreenModeRK11RefreshRate",
     "unity.umbra_load": "_ZN11UmbraModule13LoadUmbraTomeEPKhm",
@@ -316,6 +328,7 @@ def find_patches(lib, syms):
         patches += [(k, pc, y, ny) for k, (pc, y, ny) in sorted(found.items())]
     else:
         notes.append(f"streaming_assets: найдено {sorted(found)} -- путь останется jar:")
+
     return patches, pokes, notes
 
 

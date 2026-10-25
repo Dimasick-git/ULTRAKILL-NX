@@ -1,5 +1,5 @@
 /* android_native_unity.h -- declarations for the NDK surface implemented in
- * android_native_unity.c (replaces cr3_nx's android_native.h for this port).
+ * android_native_unity.c.
  * Lets imports.c register these and main.c call the lifecycle helpers. */
 #ifndef ANDROID_NATIVE_UNITY_H
 #define ANDROID_NATIVE_UNITY_H
@@ -53,7 +53,7 @@ int         ASensor_getType(const void *);
 float       ASensor_getResolution(const void *);
 int         ASensor_getMinDelay(const void *);
 
-void android_get_orientation(float *x, float *y, float *z); /* cr3 dead-handler stub */
+void android_get_orientation(float *x, float *y, float *z); /* for jni_fake.c fallbacks */
 
 /* fake-fd pipe layer (fakefd.c) -- libc_shim.c routes pipe()/read/write/close here */
 int  fakefd_is_fake(int fd);

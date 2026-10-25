@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <switch.h>
+typedef struct { uintptr_t address, caller; uint32_t owner; } NxGcLockTrace;
+int nx_gc_snapshot_collector(ThreadContext *context, unsigned *phase, NxGcLockTrace *trace);
 int nxb_gc_bridge_init(unsigned abi);
 int nxb_gc_begin(void);
 int nxb_gc_pause(uintptr_t thread, uintptr_t *sp);

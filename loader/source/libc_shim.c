@@ -1,4 +1,4 @@
-/* libc_shim.c -- bionic-compatible libc wrappers for libcrx.so + libc++_shared
+/* libc_shim.c -- bionic-compatible libc wrappers for the game's Android libraries
  *
  * The Android engine and its C++ runtime are linked against bionic. Where the
  * bionic and newlib ABIs differ (struct layouts, flag values, missing
@@ -26,9 +26,13 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <malloc.h>
+#include "nx_alloc_diag.h"
 #include "config.h"
 #include "nx_gameroot.h"   /* runtime game folder (was hardcoded GAME_HOME) */
 #include "nx_cpu.h"
+#include "nx_frame.h"
+#include "nx_sync_registry.h"
+#include "nx_warp.h"
 #include "nx_shader_diag.h"
 #include <wchar.h>
 #include <wctype.h>
@@ -149,52 +153,76 @@ int gettid_fake(void) {
 #define ARM64_SYS_PROCESS_VM_READV  270
 #define ARM64_SYS_PROCESS_VM_WRITEV 271
 
-// futex(2) emulation over libnx mutex+condvar. The il2cpp runtime synchronizes
-// its GC, thread pool and locks with raw futex; returning ENOSYS made every
-// waiter spin forever (the syscall(98) -> ENOSYS flood) and threading never made
-// progress. Wait queues are hashed by uaddr into a bucket array; FUTEX_WAKE wakes
-// the whole bucket (waiters re-check *uaddr, so over-broad wakes are harmless).
-// The bucket mutex serializes compare-and-sleep against wakers so no wake is lost.
-// Infinite waits are capped at 16ms and return as if woken: under load a wake can
-// be missed (the Unity Job System / GC otherwise deadlock), and a bounded re-poll
-// recovers it safely since the waiter re-checks *uaddr before proceeding.
+// Raw Android futexes must remain usable while GC has suspended mutators.
+// A bucket mutex once blocked FUTEX_WAKE while held by a suspended thread. Use
+// Horizon's atomic compare-and-wait/wake directly: there is no userspace owner.
 #define FUTEX_WAIT        0
 #define FUTEX_WAKE        1
 #define FUTEX_WAIT_BITSET 9
 #define FUTEX_WAKE_BITSET 10
-#define FUTEX_CMD_MASK    0x7f  // strip FUTEX_PRIVATE_FLAG(128)/CLOCK_REALTIME(256)
-#define FUTEX_BUCKETS     256
+#define FUTEX_CMD_MASK    0x7f
+#define FUTEX_CLOCK_REALTIME 0x100
+#define NX_FUTEX_POLL_NS 16000000LL
 
-static Mutex   futex_lock[FUTEX_BUCKETS];   // libnx Mutex/CondVar are u32; 0 == ready
-static CondVar futex_cond[FUTEX_BUCKETS];
-
+static int64_t futex_ns(uint64_t seconds,uint64_t nanoseconds) {
+  return seconds>((uint64_t)INT64_MAX-nanoseconds)/1000000000ULL ? INT64_MAX :
+    (int64_t)(seconds*1000000000ULL+nanoseconds);
+}
 static long futex_impl(volatile int32_t *uaddr, int op, int val, const struct timespec *to) {
-  const int cmd = op & FUTEX_CMD_MASK;
-  const unsigned h = (unsigned)(((uintptr_t)uaddr >> 4) & (FUTEX_BUCKETS - 1));
-  if (cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET) {
-    long ret = 0;
-    mutexLock(&futex_lock[h]);
-    if (*uaddr != val) {
-      errno = EAGAIN; ret = -1;
-    } else if (to) {
-      const u64 ns = (u64)to->tv_sec * 1000000000ULL + (u64)to->tv_nsec;
-      if (R_FAILED(condvarWaitTimeout(&futex_cond[h], &futex_lock[h], ns))) {
-        errno = ETIMEDOUT; ret = -1;
+  const int cmd=op & FUTEX_CMD_MASK;
+  if(cmd!=FUTEX_WAIT && cmd!=FUTEX_WAIT_BITSET && cmd!=FUTEX_WAKE && cmd!=FUTEX_WAKE_BITSET) {
+    errno=ENOSYS;return -1;
+  }
+  if(!uaddr){errno=EFAULT;return -1;}
+  if((uintptr_t)uaddr & 3){errno=EINVAL;return -1;}
+  if(cmd==FUTEX_WAKE || cmd==FUTEX_WAKE_BITSET) {
+    if(val<0){errno=EINVAL;return -1;}
+    if(!val)return 0;
+    // Bitset wake keeps the previous broadcast behavior. Callers recheck their
+    // word; SVC does not expose the number actually woken, so retain the old
+    // approximate return count. No mutex, allocation, or log on this path.
+    Result rc=svcSignalToAddress((void *)uaddr,SignalType_Signal,0,
+      cmd==FUTEX_WAKE_BITSET?INT32_MAX:val);
+    if(R_SUCCEEDED(rc))return val;
+    errno=(rc==KERNELRESULT(InvalidAddress) || rc==KERNELRESULT(InvalidMemoryState))?EFAULT:EINVAL;
+    return -1;
+  }
+  int64_t timeout=NX_FUTEX_POLL_NS;int deadline=0;
+  if(to) {
+    if(to->tv_sec<0 || to->tv_nsec<0 || to->tv_nsec>=1000000000L){errno=EINVAL;return -1;}
+    int64_t duration;
+    if(cmd==FUTEX_WAIT_BITSET) {
+      struct timespec now;
+      if(clock_gettime(op & FUTEX_CLOCK_REALTIME?CLOCK_REALTIME:CLOCK_MONOTONIC,&now))return -1;
+      if(to->tv_sec<now.tv_sec || (to->tv_sec==now.tv_sec && to->tv_nsec<=now.tv_nsec))duration=0;
+      else {
+        uint64_t seconds=(uint64_t)to->tv_sec-(uint64_t)now.tv_sec;
+        int64_t ns=to->tv_nsec-now.tv_nsec;
+        if(ns<0){--seconds;ns+=1000000000LL;}
+        duration=futex_ns(seconds,(uint64_t)ns);
       }
-    } else {
-      diag_futex_spin(uaddr); // beacon: alive-but-spinning if value never flips
-      condvarWaitTimeout(&futex_cond[h], &futex_lock[h], 16000000ULL); // capped infinite wait
-    }
-    mutexUnlock(&futex_lock[h]);
-    return ret;
+    } else duration=futex_ns((uint64_t)to->tv_sec,(uint64_t)to->tv_nsec);
+    if(duration<=timeout){timeout=duration;deadline=1;}
   }
-  if (cmd == FUTEX_WAKE || cmd == FUTEX_WAKE_BITSET) {
-    mutexLock(&futex_lock[h]);
-    condvarWakeAll(&futex_cond[h]);
-    mutexUnlock(&futex_lock[h]);
-    return val > 0 ? val : 0; // approximate count woken
+  /* поток рендера ждёт команды -- пора ли вставить повёрнутый кадр (nx_warp.c) */
+  int warp_cut=0;
+  if(nx_warp_on_render_thread()) {
+    const int64_t w=nx_warp_idle();
+    if(w>=0 && w<timeout){timeout=w;warp_cut=1;}
   }
-  errno = ENOSYS;
+  diag_wait_enter(DIAG_W_FUTEX,(const void *)uaddr);
+  const int on_main=nx_frame_on_main();   /* ожидание главного потока -> фаза кадра */
+  const uint64_t wait_start=on_main?armGetSystemTick():0;
+  Result rc=svcWaitForAddress((void *)uaddr,ArbitrationType_WaitIfEqual,val,timeout);
+  if(on_main)nx_frame_main_wait(armGetSystemTick()-wait_start);
+  diag_wait_exit();
+  if(R_SUCCEEDED(rc))return 0;
+  if(rc==KERNELRESULT(TimedOut) && (!deadline || warp_cut))return 0; // permitted spurious wake, same 16 ms poll as before
+  if(rc==KERNELRESULT(TimedOut))errno=ETIMEDOUT;
+  else if(rc==KERNELRESULT(InvalidState))errno=EAGAIN; // changed atomically before sleeping: no lost wake
+  else if(rc==KERNELRESULT(Cancelled))errno=EINTR;
+  else if(rc==KERNELRESULT(InvalidAddress) || rc==KERNELRESULT(InvalidMemoryState))errno=EFAULT;
+  else errno=EINVAL;
   return -1;
 }
 
@@ -225,9 +253,11 @@ long syscall_fake(long number, ...) {
       volatile int32_t *uaddr = va_arg(va, volatile int32_t *);
       const int op  = va_arg(va, int);
       const int val = va_arg(va, int);
-      const struct timespec *to = va_arg(va, const struct timespec *);
+      const struct timespec *to=NULL;
+      if((op & FUTEX_CMD_MASK)==FUTEX_WAIT || (op & FUTEX_CMD_MASK)==FUTEX_WAIT_BITSET)
+        to=va_arg(va,const struct timespec *);
       va_end(va);
-      return futex_impl(uaddr, op, val, to);
+      return futex_impl(uaddr,op,val,to);
     }
     case ARM64_SYS_SCHED_SETAFFINITY:
     case ARM64_SYS_SCHED_GETAFFINITY: {
@@ -332,8 +362,8 @@ static int convert_open_flags(int flags) {
   return out;
 }
 
-// The engine addresses asset packs as "<packdir>/<file>.mvgl" but we ship the
-// data flat in the game dir. If a read path with a subdirectory is missing,
+// Android code may address data under pack subdirectories that do not exist in
+// the game dir. If a read path with a subdirectory is missing,
 // fall back to just its basename in the cwd (the game dir). Reads only -- never
 // redirect a write -- and only when the basename actually exists.
 static int basename_fallback(const char *path, char *out, size_t outsz) {
@@ -367,7 +397,7 @@ static int safe_mkdir(const char *p) {
 // the whole chain (and the save write) failing.
 //
 // We must NOT try to create the game root or any ancestor of it ("sdmc:",
-// "sdmc:/switch", "sdmc:/switch/zookeeper"): they already exist, they aren't
+// "sdmc:/switch", "sdmc:/switch/ultrakill"): they already exist, they aren't
 // ours, and newlib's mkdir() of a *top-level* path (one component under the
 // device, e.g. "sdmc:/switch") null-derefs its devoptab -> Data Abort at the
 // mkdir_r slot (+0x68). So begin the parent walk *after* GAME_HOME.
@@ -400,6 +430,7 @@ static void mkdir_parents(const char *filepath) {
 
 static const char *root_relative_redirect(const char *path, char *buf, size_t sz);
 static void fd_ino_set(int fd, const char *path);
+void nx_stat_cache_invalidate(void);   /* кэш stat, ниже */
 
 // mkdir wrapper: create the full chain and treat "already exists" as success
 int mkdir_fake(const char *path, unsigned mode) {
@@ -407,6 +438,7 @@ int mkdir_fake(const char *path, unsigned mode) {
   if (!path || !*path) { errno = EINVAL; return -1; }
   char rrbuf[512];
   path = root_relative_redirect(path, rrbuf, sizeof rrbuf);
+  nx_stat_cache_invalidate();
   mkdir_p_dir(path);
   int r = safe_mkdir(path);
   if (r != 0 && errno == EEXIST) r = 0;
@@ -529,17 +561,9 @@ static const char *casetest_redirect(const char *path) {
 
 /* Redirect game-root-relative absolute paths onto the real game folder.
  *
- * Papers, Please builds its localisation path as "/assets/loc/<code>.zip" --
- * absolute from the filesystem ROOT, because on Android the StreamingAssets base
- * it concatenates resolves to the APK's assets/ directory. There is no such root
- * here, so the open failed:
- *
- *     [io] open(/assets/loc/en.zip,0x0) -> -1
- *     Unity: [Res] Language [en] load failed: NullReferenceException
- *       at Res.loadLanguage (System.String languageCode, ...)
- *
- * and the game retried forever -- the boot-blocking exception loop. It was never
- * a JNI problem at all.
+ * Android-built code may open data as "/assets/..." -- absolute from the
+ * filesystem ROOT, because on Android the StreamingAssets base it concatenates
+ * resolves to the APK's assets/ directory. There is no such root here.
  *
  * The game's data really is at <gameroot>/assets/..., so map a leading
  * "/assets/" (and the engine's own "/bin/Data/") onto it. Only used when the
@@ -627,6 +651,7 @@ int open_fake(const char *path, int flags, ...) {
   if (flags & LINUX_O_CREAT) { va_list va; va_start(va, flags); mode = va_arg(va, int); va_end(va); }
   const int cvt = convert_open_flags(flags);
   const int writing = (flags & 3) != 0 || (flags & LINUX_O_CREAT);
+  if (writing) nx_stat_cache_invalidate();   /* кэш stat */
   if (!writing) {
     // /dev/urandom + /dev/random: Switch has no /dev node, but Mono/.NET (RNG
     // seeds, Guid.NewGuid, hashtable randomization) and asset crypto open these.
@@ -696,6 +721,7 @@ int openat_fake(int dirfd, const char *path, int flags, ...) {
 }
 int unlinkat_fake(int dirfd, const char *path, int flags) {
   (void)dirfd;
+  nx_stat_cache_invalidate();
   char rrbuf[512];
   path = root_relative_redirect(path, rrbuf, sizeof rrbuf);
   return (flags & 0x200 /* AT_REMOVEDIR */) ? rmdir(path) : unlink(path);
@@ -752,7 +778,78 @@ static void convert_stat(const struct stat *in, struct bionic_stat *out) {
   out->st_atim.tv_sec = in->st_atime; out->st_mtim.tv_sec = in->st_mtime; out->st_ctim.tv_sec = in->st_ctime;
 }
 
+/* Кэш stat. В бою ~3-4% главного потока -- stat из кода игры
+ * (File.Exists/Directory.Exists -> SystemNative_Stat2 -> stat -> fsdev). Код с
+ * ПК не кэширует: GameBuildSettings.GetInstance проверяет отсутствующий
+ * StreamingAssets/GameBuildSettings.json при каждом вызове, а
+ * GameProgressSaver.ReadFile при каждом чтении прогресса заново проверяет
+ * папки сохранений. На ПК это файловый кэш ОС, у нас каждый stat -- IPC к
+ * файловому сервису. Кэшируем и успехи, и «нет такого файла». Все файловые
+ * операции игры идут через наши шимы, поэтому любая запись (open на запись,
+ * write, fclose, mkdir, unlink, rmdir, remove, rename) сбрасывает кэш целиком
+ * (поколение++), а запись живёт не дольше 2 с. */
+#define STAT_CACHE_SLOTS  256
+#define STAT_CACHE_TTL_NS 2000000000ULL
+typedef struct {
+  uint32_t gen;
+  int r, err;
+  uint64_t tick;
+  char path[232];
+  struct bionic_stat st;
+} StatCacheEntry;
+static StatCacheEntry g_stat_cache[STAT_CACHE_SLOTS];
+static volatile uint32_t g_stat_gen = 1;
+static Mutex g_stat_lock;
+static volatile uint32_t g_stat_hits, g_stat_misses;
+
+void nx_stat_cache_invalidate(void) { __atomic_add_fetch(&g_stat_gen, 1, __ATOMIC_RELAXED); }
+void nx_stat_cache_report(void) {
+  const uint32_t h = g_stat_hits, m = g_stat_misses;
+  debugPrintf("[stat-cache] попаданий %u, промахов %u (%.0f%%)\n", h, m, h + m ? 100.0 * h / (h + m) : 0.0);
+}
+
+static uint32_t stat_cache_slot(const char *path) {
+  uint32_t h = 2166136261u;
+  for (const unsigned char *p = (const unsigned char *)path; *p; p++) h = (h ^ *p) * 16777619u;
+  return h & (STAT_CACHE_SLOTS - 1);
+}
+
+static int stat_uncached(const char *path, struct bionic_stat *st);
+
 int stat_fake(const char *path, struct bionic_stat *st) {
+  if (!path || strlen(path) >= sizeof g_stat_cache[0].path) return stat_uncached(path, st);
+  const uint32_t slot = stat_cache_slot(path);
+  const uint64_t now = armGetSystemTick();
+  const uint32_t gen = __atomic_load_n(&g_stat_gen, __ATOMIC_RELAXED);
+  mutexLock(&g_stat_lock);
+  StatCacheEntry *e = &g_stat_cache[slot];
+  if (e->gen == gen && !strcmp(e->path, path) && armTicksToNs(now - e->tick) < STAT_CACHE_TTL_NS) {
+    const int r = e->r, err = e->err;
+    if (r == 0) *st = e->st;
+    mutexUnlock(&g_stat_lock);
+    g_stat_hits++;
+    if (r != 0) errno = err;
+    return r;
+  }
+  mutexUnlock(&g_stat_lock);
+  g_stat_misses++;
+  struct bionic_stat tmp;
+  const int r = stat_uncached(path, &tmp);
+  const int err = errno;
+  if (r == 0) *st = tmp;
+  mutexLock(&g_stat_lock);
+  e->gen = gen;                    /* поколение до запроса: запись посреди stat -- и это устарело */
+  e->r = r;
+  e->err = err;
+  e->tick = now;
+  strcpy(e->path, path);
+  if (r == 0) e->st = tmp;
+  mutexUnlock(&g_stat_lock);
+  errno = err;
+  return r;
+}
+
+static int stat_uncached(const char *path, struct bionic_stat *st) {
   path = casetest_redirect(path);
   /* Same root-relative redirect as open_fake/fopen_fake. This one matters just
    * as much: the managed file layer stats a path BEFORE reading it (File.Exists,
@@ -819,18 +916,22 @@ void *opendir_fake(const char *path) {
 }
 int unlink_fake(const char *path) {
   char rrbuf[512];
+  nx_stat_cache_invalidate();
   return unlink(root_relative_redirect(path, rrbuf, sizeof rrbuf));
 }
 int rmdir_fake(const char *path) {
   char rrbuf[512];
+  nx_stat_cache_invalidate();
   return rmdir(root_relative_redirect(path, rrbuf, sizeof rrbuf));
 }
 int remove_fake(const char *path) {
   char rrbuf[512];
+  nx_stat_cache_invalidate();
   return remove(root_relative_redirect(path, rrbuf, sizeof rrbuf));
 }
 int rename_fake(const char *from, const char *to) {
   char a[512], b[512];
+  nx_stat_cache_invalidate();
   return rename(root_relative_redirect(from, a, sizeof a), root_relative_redirect(to, b, sizeof b));
 }
 
@@ -876,7 +977,7 @@ size_t wcsnrtombs_fake(char *dst, const wchar_t **src, size_t nwc, size_t len, v
 // ---------------------------------------------------------------------------
 
 int posix_memalign_fake(void **out, size_t align, size_t size) {
-  void *p = memalign(align, size);
+  void *p = nx_memalign_diag(align, size);
   if (!p) return ENOMEM;
   *out = p;
   return 0;
@@ -1563,11 +1664,10 @@ static const char *synthetic_proc(const char *path) {
   return NULL;
 }
 
-// a buffered fopen for the big .mvgl archives: the engine issues many small
-// reads/seeks and the fsdev round-trips dominate without a large buffer.
+// fopen with the path redirects, synthetic /proc files and save-dir creation.
 FILE *fopen_fake(const char *path, const char *mode) {
-  /* Same root-relative redirect as open_fake: the game reaches its localisation
-   * zips through stdio as well as raw open(). See root_relative_redirect(). */
+  /* Same root-relative redirect as open_fake: data is reached through stdio as
+   * well as raw open(). See root_relative_redirect(). */
   char rrbuf[512];
   path = root_relative_redirect(path, rrbuf, sizeof rrbuf);
   path = casetest_redirect(path);
@@ -1577,6 +1677,7 @@ FILE *fopen_fake(const char *path, const char *mode) {
     return fmemopen((void *)strdup(synth), n ? n : 1, "r");
   }
   const int writing = strpbrk(mode, "wa+") != NULL;
+  if (writing) nx_stat_cache_invalidate();   /* кэш stat */
   FILE *f = fopen(path, mode);
   if (!f && writing) {            // save file: create the subdir and retry
     mkdir_parents(path);
@@ -1590,11 +1691,6 @@ FILE *fopen_fake(const char *path, const char *mode) {
   if (!f)
     return NULL;
   debugPrintf("[io] fopen(%s,%s) -> %p\n", path, mode, (void *)f);
-  if (strchr(mode, 'r')) {
-    const char *ext = strrchr(path, '.');
-    if (ext && strcasecmp(ext, ".mvgl") == 0)
-      setvbuf(f, NULL, _IOFBF, 256 * 1024);
-  }
   return f;
 }
 
@@ -1639,6 +1735,7 @@ int fclose_fake(FILE *f) {
    * soon as fclose completes, even while this operation lock is still held. */
   fd_ino_set(fd,NULL);
   int r=fclose(f);
+  nx_stat_cache_invalidate();   /* буфер stdio дописан на диск */
   nx_fd_unlock(fd);
   return r;
 }
@@ -1716,14 +1813,15 @@ long write_fake(int fd, const void *buf, size_t count) {
   nx_fd_lock(fd);
   long r = write(fd, buf, count);
   nx_fd_unlock(fd);
+  nx_stat_cache_invalidate();   /* размер файла изменился */
   return r;
 }
 int close_fake(int fd) {
   if (fd == g_watch_fd) { debugPrintf("[io] <<< close watched fd=%d\n", fd); g_watch_fd = -1; }
   if (fakefd_is_fake(fd)) return fakefd_close(fd);
   /* newlib __get_handle releases its table lock before _lseek_r uses the
-   * returned handle. Closing concurrently can free it in that gap (r32 crash
-   * A78576D2: _lseek_r+0x40, called by z_lseek). Share the operation lock so
+   * returned handle. Closing concurrently can free it in that gap (crash in
+   * _lseek_r+0x40, called by z_lseek). Share the operation lock so
    * close cannot invalidate a handle while read/seek/pread is using it. */
   nx_fd_lock(fd);
   fd_ino_set(fd, NULL);
@@ -1811,7 +1909,7 @@ char *getenv_fake(const char *name) {
   }
   return getenv(name);
 }
-// Report a Unix-rooted cwd ("/switch/zookeeper", no "sdmc:") so managed Path
+// Report a Unix-rooted cwd ("/switch/ultrakill", no "sdmc:") so managed Path
 // APIs don't treat it as relative in Path.Combine. newlib's *internal* cwd is
 // unchanged, so relative file resolution still works via the default device.
 char *getcwd_fake(char *buf, size_t size) {
@@ -1890,28 +1988,28 @@ void *dlsym_fake(void *handle, const char *symbol) {
 // ---------------------------------------------------------------------------
 
 typedef struct { RwLock lock; } FakeRwLock;
-static Mutex g_rw_init_lock;
 
 int pthread_rwlock_init_fake(void **storage, const void *attr) {
-  (void)attr;
-  FakeRwLock *l = calloc(1, sizeof(*l));
-  if (!l) return ENOMEM;
+  (void)attr;if(!storage)return EINVAL;
+  if(nx_sync_lookup(storage))return 0;
+  FakeRwLock *l=calloc(1,sizeof(*l));if(!l)return ENOMEM;
   rwlockInit(&l->lock);
-  *storage = l;
+  FakeRwLock *winner=nx_sync_publish(storage,l);
+  if(winner!=l)free(l);
+  if(!winner)return ENOMEM;
+  __atomic_store_n((uint32_t *)storage,0x4e580001u,__ATOMIC_RELEASE);
   return 0;
 }
 int pthread_rwlock_destroy_fake(void **storage) {
-  free(*storage);
-  *storage = NULL;
+  if(!storage)return EINVAL;
+  free(nx_sync_remove(storage));
+  __atomic_store_n((uint32_t *)storage,0,__ATOMIC_RELEASE);
   return 0;
 }
-
 static FakeRwLock *get_rwlock(void **storage) {
-  mutexLock(&g_rw_init_lock);
-  if (!*storage) pthread_rwlock_init_fake(storage, NULL);
-  FakeRwLock *l = *storage;
-  mutexUnlock(&g_rw_init_lock);
-  return l;
+  FakeRwLock *l=nx_sync_lookup(storage);if(l)return l;
+  if(pthread_rwlock_init_fake(storage,NULL)!=0)return NULL;
+  return nx_sync_lookup(storage);
 }
 int pthread_rwlock_rdlock_fake(void **rw) {
   FakeRwLock *f = get_rwlock(rw);
@@ -1956,10 +2054,10 @@ int sem_timedwait_fake(void **s, const struct timespec *abs) {
   return -1;
 }
 
-/* Legacy signal acknowledgments for pre-r23 libraries only. They do not
+/* Legacy signal acknowledgments for libraries without the Horizon GC bridge. They do not
  * suspend mutators or publish roots and are NOT a valid collector backend.
  * main.c leaves collection disabled when such an old library is loaded.
- * r23's patched Boehm uses nx_gc.c callbacks instead; unexpected signal-based
+ * The patched Boehm uses nx_gc.c callbacks instead; unexpected signal-based
  * suspension with that backend fails rather than acknowledging a live thread. */
 uintptr_t g_il2cpp_base = 0;
 
@@ -1967,6 +2065,7 @@ uintptr_t g_il2cpp_base = 0;
  * молчит и сигналы GC уходят в пустоту, как обычный pthread_kill. */
 #include "nx_offsets.h"
 #include "nx_gc.h"
+#include "nx_sync_registry.h"
 
 int pthread_kill_gc(pthread_t t, int sig) {
   (void)t;

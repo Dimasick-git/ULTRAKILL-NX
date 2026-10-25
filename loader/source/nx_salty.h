@@ -21,3 +21,7 @@ _Static_assert(offsetof(NxSaltyBlock,frame)==165,"packed frame");
 _Static_assert(offsetof(NxSaltyBlock,refresh)==159,"Status Monitor refresh ABI");
 void nx_salty_init(void);
 void nx_salty_present(uint64_t tick);
+void nx_salty_shutdown(void);
+
+/* Main-thread limiter consumes this cap; no sleep on the present thread. */
+int nx_salty_fps_limit(void);

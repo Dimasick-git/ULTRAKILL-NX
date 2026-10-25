@@ -16,7 +16,7 @@
  * INTEGRATION (two one-line delegations in jni_fake.c, mirroring unity_jni.c):
  *   in dispatch_int():   if (input_owns_class(id->cls)) return input_dispatch_int(recv,id,va);
  *   in dispatch_float(): if (input_owns_class(id->cls)) return input_dispatch_float(recv,id,va);
- * (dispatch_float already exists in cr3_nx and is wired to CallFloatMethod[V].)
+ * (dispatch_float is wired to CallFloatMethod[V] in jni_fake.c.)
  */
 #ifndef UNITY_INPUT_H
 #define UNITY_INPUT_H

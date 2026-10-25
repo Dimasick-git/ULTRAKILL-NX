@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: python3 tools/test_localization.py
       - run: python3 tools/test_cpu_affinity.py --cc gcc
       - run: python3 tools/test_dladdr.py --cc gcc
       - run: python3 tools/test_gc_bridge.py --cc gcc
@@ -16,8 +17,14 @@ jobs:
       - run: python3 tools/test_salty_session.py --cc gcc
       - run: python3 tools/test_render_control.py --cc gcc
       - run: python3 tools/test_loading_boost.py --cc gcc
+      - run: python3 tools/test_fps_policy.py --cc gcc
+      - run: python3 tools/test_fps_request.py --cc gcc
+      - run: python3 tools/test_diagnostic_mode.py --cc gcc
+      - run: python3 tools/test_restart_patches.py
       - run: python3 tools/test_release_paths.py
       - run: python3 tools/test_touch_installed.py --cc gcc
       - run: python3 tools/test_unity_splits.py
-      - run: python3 tools/test_boot_overlay.py
-      - run: python3 tools/test_fd_lifetime.py --cc gcc
+      - run: python3 tools/test_audio_output.py --cc gcc
+      - run: python3 tools/test_sdl_audio_pacing.py --cc gcc
+      - run: python3 tools/test_world_mrt.py --cxx g++
+      - run: python3 tools/test_fsr31_deko.py

@@ -1,9 +1,10 @@
-/* opensles.h -- minimal OpenSL ES shim for the Cuore/SQEX sound layer
+/* opensles.h -- minimal OpenSL ES shim (from the FF4 base loader), used by
+ * Unity's FMOD opensl output
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
  *
- * libff4.so links against the Android OpenSL ES system library, which has no
+ * libunity dlopen()s the Android OpenSL ES system library, which has no
  * devkitPro equivalent. We implement just enough of the object model
  * (Engine -> OutputMix / AudioPlayer with an Android simple buffer queue, plus
  * the Play and Volume interfaces) and back the buffer-queue players with a
@@ -20,6 +21,7 @@ uint32_t slCreateEngine(void **pEngine, uint32_t numOptions, const void *pEngine
                         const void *pInterfaceRequired);
 
 void opensles_shutdown(void);
+void opensles_diagnostics(void);
 
 
 int opensles_movie_begin(int requested_rate);
@@ -36,7 +38,7 @@ int      audio_fmod_open(int rate, int channels);      // returns actual device 
 uint32_t audio_fmod_write(const void *pcm, int bytes); // returns queued bytes after append
 uint32_t audio_fmod_queued(void);                      // currently queued bytes
 
-// interface-id tokens referenced by libff4.so relocations. Each is a unique
+// interface-id tokens the engine looks up via dlsym. Each is a unique
 // non-NULL sentinel (self-addressed); the engine passes the value to
 // GetInterface and we compare pointers.
 extern void *SL_IID_3DCOMMIT, *SL_IID_3DDOPPLER, *SL_IID_3DGROUPING, *SL_IID_3DLOCATION;

@@ -8,9 +8,11 @@
 """
 
 import struct
+import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import UnityPy  # noqa: E402
 from UnityPy.helpers import CompressionHelper  # noqa: E402
 

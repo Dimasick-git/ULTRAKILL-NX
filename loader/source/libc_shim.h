@@ -1,4 +1,4 @@
-/* libc_shim.h -- bionic-compatible libc wrappers for libcrx.so + libc++_shared
+/* libc_shim.h -- bionic-compatible libc wrappers for the game's Android libraries
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -15,10 +15,10 @@
 #include <pthread.h>
 
 // Return `p` with any leading "device:" (e.g. "sdmc:") stripped, so the result
-// is a Unix-rooted path ("/switch/zookeeper"). Paths handed to managed code
+// is a Unix-rooted path ("/switch/ultrakill"). Paths handed to managed code
 // (Mono/IL2CPP) MUST be device-less: ":" isn't a Unix root marker, so a
 // "sdmc:/..." path is treated as relative and Path.Combine() concatenates it
-// after a relative asset path -> "assets/bin/Data/sdmc:/switch/zookeeper",
+// after a relative asset path -> "assets/bin/Data/sdmc:/switch/ultrakill",
 // which newlib then mis-parses (embedded device) and null-derefs. newlib still
 // resolves device-less absolute paths via the default device (sdmc, set by our
 // boot chdir), so file I/O is unaffected.

@@ -14,11 +14,13 @@ Resources/unity default resources. В отличие от transplant_shaders.py 
 """
 
 import gc
+import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import UnityPy  # noqa: E402
 import lean_tt  # noqa: E402
 import shader_port  # noqa: E402

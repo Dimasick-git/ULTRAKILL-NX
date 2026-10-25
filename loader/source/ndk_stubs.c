@@ -1,10 +1,10 @@
-/* ndk_stubs.c -- no-op bodies for the NDK functions imports.c registers that
- * cr3_nx's dropped android_native.c / text2bitmap.c used to define.
+/* ndk_stubs.c -- bodies for the NDK functions imports.c registers that the base
+ * loader's (cr3_nx) android_native.c / text2bitmap.c used to define.
  *
- * PAPERS, PLEASE (Unity IL2CPP) never calls these: it loads assets through the
- * Java AssetManager (handled in unity_jni.c) and feeds input via JNI
+ * Unity never calls most of these: it loads assets through the Java
+ * AssetManager (handled in unity_jni.c) and feeds input via JNI
  * nativeInjectEvent (unity_input.c), not the AInputQueue/AMotionEvent NDK path.
- * They exist only so the imports.c table links. Signatures match the extern
+ * They exist so the imports.c table links. Signatures match the extern
  * declarations in imports.c exactly.
  */
 
@@ -70,19 +70,12 @@ void  AConfiguration_delete(void *a) { (void)a; }
 
 /* AAsset -- backed by real files under <gameroot>/assets/.
  *
- * The base returned NULL here, on the reasoning that Unity reads through the
- * Java AssetManager instead. That held for the game it was written for, whose
- * data all lived under assets/bin/Data and arrived through ordinary file I/O.
+ * Most data reaches Unity through ordinary file I/O, but StreamingAssets files
+ * may come through the native AAsset API depending on the path Unity picks at
+ * runtime, and a NULL here would be a silent missing file (or a null-deref)
+ * rather than an honest error. Serving them from disk costs a few lines.
  *
- * Papers, Please also ships assets/loc zip files -- sixteen localisation archives
- * that live in StreamingAssets, not in bin/Data. Whether the engine reaches
- * those through the native AAsset API or through UnityWebRequest depends on the
- * path Unity picks at runtime, and a NULL here would be a silent "no
- * localisation" (or worse, a null-deref) rather than an honest error. Serving
- * them from disk costs a few lines and removes the question. If the engine
- * never calls this, nothing is lost.
- *
- * Names arrive relative to the APK's assets/ root, e.g. "loc/en.zip". */
+ * Names arrive relative to the APK's assets/ root, e.g. "NxPort/lang/ru.tsv". */
 void *AAssetManager_fromJava(void *a, void *b) { (void)a;(void)b;
   /* Non-NULL so callers proceed to AAssetManager_open; the value is opaque and
    * we never dereference it. */

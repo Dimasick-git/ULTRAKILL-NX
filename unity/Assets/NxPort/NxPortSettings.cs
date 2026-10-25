@@ -1,140 +1,226 @@
+using System;
 using System.Collections.Generic;
+using SettingsMenu.Components;
+using SettingsMenu.Models;
+using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 namespace NxPort
 {
+    // Native prefabs keep the game's styling, touch, focus and Back behavior.
+    // There is deliberately no separate canvas or SWITCH menu.
     public sealed class NxPortSettings : MonoBehaviour
     {
         readonly Dictionary<string, float> pending = new Dictionary<string, float>();
-        Canvas canvas;
-        GameObject window;
-        Button launch, close;
-        Text status;
-        Font font;
+        readonly List<ScriptableObject> definitions = new List<ScriptableObject>();
         float searchAt, saveAt;
-        bool open;
-        global::SettingsMenu.Components.SettingsMenu menu;
-        GameObject oldSelection;
+        bool updateLinks = true;
+        void OnEnable() { SceneManager.sceneLoaded += SceneLoaded; }
+        void SceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            string name = scene.name.Replace(" ", "");
+            updateLinks = name.IndexOf("MainMenu", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        internal static readonly string[] LanguageOptions = {
+            "System", "English", "Russian", "Ukrainian", "Deutsch", "French", "Spanish",
+            "Portuguese (Brazil)", "Italiano", "Polski", "Turkish", "Japanese", "Korean",
+            "Chinese (Simplified)", "Chinese (Traditional)"
+        };
+        internal static readonly string[] UpscalerOptions = { "OFF", "FSR 1" };
 
         void Update()
         {
-            if (Time.unscaledTime >= searchAt)
-            {
-                searchAt = Time.unscaledTime + 0.5f;
-                menu = FindObjectOfType<global::SettingsMenu.Components.SettingsMenu>();
-                if (menu && !canvas) Build();
-            }
-            if (!canvas) return;
-            bool visible = menu && menu.isActiveAndEnabled;
-            canvas.enabled = visible;
-            if (!visible && open) SetOpen(false);
             if (pending.Count != 0 && Time.unscaledTime >= saveAt) Flush();
-            if (open && Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame) SetOpen(false);
+            if (Time.unscaledTime < searchAt) return;
+            searchAt = Time.unscaledTime + 0.5f;
+            var menu = FindActiveMenu();
+            if (menu) AttachNative(menu.transform);
+            if (updateLinks) updateLinks = !UpdateCommunityLink();
         }
 
-        RectTransform Rect(string name, Transform parent, Vector2 size, Vector2 position)
+        internal static global::SettingsMenu.Components.SettingsMenu FindActiveMenu()
+            => FirstVisible(FindObjectsOfType<global::SettingsMenu.Components.SettingsMenu>(true)) as global::SettingsMenu.Components.SettingsMenu;
+        internal static Behaviour FirstVisible(Behaviour[] candidates)
         {
-            var go = new GameObject(name, typeof(RectTransform));
-            var rect = (RectTransform)go.transform; rect.SetParent(parent, false);
-            rect.sizeDelta = size; rect.anchoredPosition = position; return rect;
+            foreach (var candidate in candidates)
+                if (candidate && candidate.isActiveAndEnabled) return candidate;
+            return null;
         }
-
-        Text Label(Transform parent, string text, Vector2 size, Vector2 position, int point = 22)
-        {
-            var label = Rect("Label", parent, size, position).gameObject.AddComponent<Text>();
-            label.font = font; label.text = text; label.fontSize = point;
-            label.color = Color.white; label.alignment = TextAnchor.MiddleLeft; label.raycastTarget = false; return label;
-        }
-
-        Button Button(Transform parent, string title, Vector2 size, Vector2 position)
-        {
-            var rect = Rect(title, parent, size, position);
-            var image = rect.gameObject.AddComponent<Image>(); image.color = new Color(0.36f, 0.035f, 0.035f, 1);
-            var button = rect.gameObject.AddComponent<Button>(); button.targetGraphic = image;
-            Label(rect, title, size - new Vector2(20, 0), Vector2.zero).alignment = TextAnchor.MiddleCenter;
-            return button;
-        }
-
-        void Queue(string key, float value)
-        { pending[key] = value; saveAt = Time.unscaledTime + 0.4f; status.text = "Saving..."; }
-
+        void Queue(string key, float value) { pending[key] = value; saveAt = Time.unscaledTime + 0.4f; }
         void Flush()
         {
-            bool okay = true;
-            foreach (var setting in pending) okay &= NxBridge.SetConfig(setting.Key, setting.Value);
-            pending.Clear(); if (status) status.text = okay ? "Saved to SD card" : "Could not save: check free space / SD card";
+            foreach (var setting in pending)
+                if (!NxBridge.SetConfig(setting.Key, setting.Value)) NxBridge.Log("[settings] could not save " + setting.Key);
+            pending.Clear();
         }
-
-        void Switch(Transform parent, string title, string key, float y)
+        T Definition<T>() where T : ScriptableObject
         {
-            Label(parent, title, new Vector2(560, 42), new Vector2(-85, y));
-            bool value = NxBridge.ConfigInt(key == "fsr" ? "fsr_enabled" : key) != 0;
-            var button = Button(parent, value ? "ON" : "OFF", new Vector2(130, 40), new Vector2(290, y));
-            var label = button.GetComponentInChildren<Text>();
-            button.onClick.AddListener(() => { value = !value; label.text = value ? "ON" : "OFF"; Queue(key, value ? 1 : 0); });
+            var value = ScriptableObject.CreateInstance<T>(); definitions.Add(value); return value;
         }
-
-        void Range(Transform parent, string title, string key, float min, float max, float value, float y, bool whole)
+        static void Bind(TMP_Text text, Func<string> render)
         {
-            var label = Label(parent, title + "  " + value.ToString("0.##"), new Vector2(420, 42), new Vector2(-155, y));
-            var rect = Rect(title, parent, new Vector2(290, 32), new Vector2(220, y));
-            rect.gameObject.AddComponent<Image>().color = Color.clear;
-            var track = Rect("Track", rect, new Vector2(290, 6), Vector2.zero).gameObject.AddComponent<Image>();
-            track.color = new Color(0.3f, 0.3f, 0.3f); track.raycastTarget = false;
-            var area = Rect("Handle area", rect, new Vector2(266, 32), Vector2.zero);
-            var handle = Rect("Handle", area, new Vector2(24, 32), Vector2.zero).gameObject.AddComponent<Image>();
-            handle.color = Color.cyan;
-            var slider = rect.gameObject.AddComponent<Slider>(); slider.handleRect = (RectTransform)handle.transform;
-            slider.targetGraphic = handle; slider.minValue = min; slider.maxValue = max; slider.wholeNumbers = whole;
-            slider.value = value;
-            slider.onValueChanged.AddListener(v => { label.text = title + "  " + v.ToString("0.##"); Queue(key, v); });
+            if (!text) return;
+            var binding = text.GetComponent<NxSettingsLabel>() ?? text.gameObject.AddComponent<NxSettingsLabel>();
+            binding.Bind(text, render);
         }
-
-        void Build()
+        SettingsCategory Section(SettingsPageBuilder page, Transform content, string title)
         {
-            font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            var root = Rect("NX settings", transform, Vector2.zero, Vector2.zero);
-            canvas = root.gameObject.AddComponent<Canvas>(); canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 30000;
-            var scale = root.gameObject.AddComponent<CanvasScaler>(); scale.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scale.referenceResolution = new Vector2(1280, 720); scale.matchWidthOrHeight = 0.5f;
-            root.gameObject.AddComponent<GraphicRaycaster>();
-            launch = Button(root, "SWITCH", new Vector2(170, 44), new Vector2(525, -320));
-            launch.onClick.AddListener(() => SetOpen(true));
-            window = Rect("Modal", root, new Vector2(1280, 720), Vector2.zero).gameObject;
-            var blocker = window.AddComponent<Image>(); blocker.color = new Color(0, 0, 0, 0.85f);
-            var panel = Rect("Panel", window.transform, new Vector2(860, 660), Vector2.zero);
-            panel.gameObject.AddComponent<Image>().color = new Color(0.06f, 0.06f, 0.06f, 1);
-            Label(panel, "ULTRAKILL - NX / SWITCH", new Vector2(760, 48), new Vector2(0, 286), 28);
-            Range(panel, "Render height", "render_height", 180, 720, NxBridge.ConfigInt("render_height"), 216, true);
-            Switch(panel, "FSR 1 / EASU + RCAS", "fsr", 158);
-            Range(panel, "RCAS attenuation (0 = strongest)", "fsr_sharpness", 0, 2, NxBridge.ConfigFloat("fsr_sharpness"), 100, false);
-            Switch(panel, "Gyroscope", "gyro", 42);
-            Range(panel, "Gyro sensitivity", "gyro_sens", 0.1f, 20, NxBridge.ConfigFloat("gyro_sens"), -16, false);
-            Switch(panel, "Invert gyro X", "gyro_invert_x", -74);
-            Switch(panel, "Invert gyro Y", "gyro_invert_y", -132);
-            Switch(panel, "CPU loading boost", "loading_boost", -190);
-            status = Label(panel, NxBridge.ConfigInt("support_reboot") != 0 ? "SaltyNX installed: reboot Atmosphere to enable FPS overlay" : "Saved to SD card", new Vector2(760, 36), new Vector2(0, -244), 18);
-            close = Button(panel, "BACK / B", new Vector2(220, 42), new Vector2(260, -292));
-            close.onClick.AddListener(() => SetOpen(false));
-            window.SetActive(false);
+            var category = Definition<SettingsCategory>(); category.title = title;
+            var header = Instantiate(page.assets.categoryTitlePrefab, content); header.name = "NX " + title;
+            header.ConfigureFrom(category, page);
+            Bind(header.GetComponentInChildren<TMP_Text>(true), () => "-- " + NxLoc.Tr(title.ToUpperInvariant()) + " --");
+            return category;
         }
-
-        void SetOpen(bool value)
+        SettingsItemBuilder Row(SettingsPageBuilder page, Transform content, string title, SettingsItemType type, out SettingsItem item)
         {
-            if (!value && pending.Count != 0) Flush();
-            open = value; window.SetActive(value); launch.gameObject.SetActive(!value);
-            var system = EventSystem.current;
-            if (system)
+            item = Definition<SettingsItem>(); item.label = title; item.itemType = type; item.noResetButton = true;
+            item.valueDisplayMultiplayer = 1; item.sideNote = "";
+            item.valueType = global::SettingsMenu.Models.ValueType.Int; item.dropdownList = Array.Empty<string>();
+            // Empty PreferenceKey isolates these settings from the game's prefs.
+            var row = Instantiate(page.assets.itemPrefab, content); row.name = "NX " + title; return row;
+        }
+        void Dropdown(SettingsPageBuilder page, Transform content, SettingsCategory category,
+            string title, string[] options, int value, Action<int> changed)
+        {
+            var row = Row(page, content, title, SettingsItemType.Dropdown, out var item);
+            item.dropdownList = options; row.ConfigureFrom(item, category, page);
+            var dropdown = row.GetComponentInChildren<TMP_Dropdown>(true);
+            dropdown.SetValueWithoutNotify(Mathf.Clamp(value, 0, options.Length - 1)); dropdown.RefreshShownValue();
+            dropdown.onValueChanged.AddListener(v => changed(v)); BindRow(row, title);
+        }
+        void Toggle(SettingsPageBuilder page, Transform content, SettingsCategory category, string title, string key)
+        {
+            var row = Row(page, content, title, SettingsItemType.Toggle, out var item);
+            item.valueType = global::SettingsMenu.Models.ValueType.Bool; row.ConfigureFrom(item, category, page);
+            var toggle = row.GetComponentInChildren<UnityEngine.UI.Toggle>(true);
+            toggle.SetIsOnWithoutNotify(NxBridge.ConfigInt(key) != 0);
+            toggle.onValueChanged.AddListener(v => Queue(key, v ? 1 : 0)); BindRow(row, title);
+        }
+        void Range(SettingsPageBuilder page, Transform content, SettingsCategory category,
+            string title, string key, float min, float max, bool whole)
+        {
+            var row = Row(page, content, title, SettingsItemType.Slider, out var item);
+            item.valueType = global::SettingsMenu.Models.ValueType.Float;
+            item.sliderConfig = new SliderConfig { minValue = min, maxValue = max, wholeNumbers = whole,
+                textConfig = new SliderValueToTextConfig { decimalType = whole ? DecimalType.NoDecimals : DecimalType.Two,
+                    multiplier = 1, suffix = "", ifMin = "", ifMax = "", minColor = Color.white, maxColor = Color.white } };
+            row.ConfigureFrom(item, category, page);
+            var slider = row.GetComponentInChildren<Slider>(true);
+            slider.SetValueWithoutNotify(Mathf.Clamp(whole ? NxBridge.ConfigInt(key) : NxBridge.ConfigFloat(key), min, max));
+            slider.onValueChanged.AddListener(v => Queue(key, v)); BindRow(row, title);
+        }
+        static void BindRow(SettingsItemBuilder row, string title)
+        {
+            foreach (var text in row.GetComponentsInChildren<TMP_Text>(true))
+                if (text.text == NxLoc.Tr(title.ToUpperInvariant()))
+                    Bind(text, () => NxLoc.Tr(title.ToUpperInvariant()));
+        }
+        void AttachNative(Transform root)
+        {
+            AttachPage(root, "General", (page, content) => {
+                var section = Section(page, content, "Language");
+                Dropdown(page, content, section, "Language", LanguageOptions, NxBridge.ConfigInt("ui_language"), v => {
+                    Queue("ui_language", v); NxLoc.Load(NxLoc.Resolve(v));
+                });
+            });
+            AttachPage(root, "Controls", (page, content) => {
+                var section = Section(page, content, "Gyroscope");
+                Toggle(page, content, section, "Gyroscope", "gyro");
+                Range(page, content, section, "Gyro sensitivity", "gyro_sens", 0.1f, 20, false);
+                Toggle(page, content, section, "Invert gyro X", "gyro_invert_x");
+                Toggle(page, content, section, "Invert gyro Y", "gyro_invert_y");
+            });
+            AttachPage(root, "Graphics", (page, content) => {
+                var section = Section(page, content, "Render");
+                Range(page, content, section, "Render height", "render_height", 180, 720, true);
+                Dropdown(page, content, section, "Upscaler", UpscalerOptions, NxBridge.ConfigInt("fsr_enabled"), v => Queue("fsr", v));
+                Range(page, content, section, "RCAS attenuation (0 = strongest)", "fsr_sharpness", 0, 2, false);
+                Toggle(page, content, section, "CPU loading boost", "loading_boost");
+                Toggle(page, content, section, "Enemy shader preload:", "spawn_warmup");
+            });
+        }
+        void AttachPage(Transform root, string name, Action<SettingsPageBuilder, Transform> build)
+        {
+            var target = root.Find("Pages/" + name); if (!target) return;
+            var page = target.GetComponent<SettingsPageBuilder>(); var content = target.Find("Scroll Rect/Contents");
+            if (!page || !page.isActiveAndEnabled || !page.assets || !content || content.Find("NX " + name)) return;
+            // Original BuildPage clears its container in Awake; wait for it.
+            if (content.childCount == 0) return;
+            build(page, content);
+            var marker = new GameObject("NX " + name); marker.transform.SetParent(content, false); marker.SetActive(false);
+            page.RefreshSelectableNavigation(); LayoutRebuilder.MarkLayoutForRebuild(content as RectTransform);
+            NxBridge.Log("[settings] native " + name + " rows attached");
+        }
+        static bool UpdateCommunityLink()
+        {
+            bool found = false;
+            foreach (var link in FindObjectsOfType<WebButton>(true))
             {
-                if (value) { oldSelection = system.currentSelectedGameObject; system.SetSelectedGameObject(close.gameObject); }
-                else if (oldSelection && oldSelection.activeInHierarchy) system.SetSelectedGameObject(oldSelection);
+                if (!link) continue;
+                if (link.gameObject.name == "NX Community" && link.url == "https://t.me/RYAZHENKACFW") { found = true; continue; }
+                string url = link.url ?? "";
+                if (url != "https://t.me/RYAZHENKACFW" && url != "https://discord.com/invite/newblood") continue;
+                var rect = link.transform as RectTransform;
+                var caption = link.GetComponentInChildren<TMP_Text>(true);
+                if (!rect || !caption) continue;
+                var removed = new List<RectTransform>();
+                foreach (var sibling in link.transform.parent.GetComponentsInChildren<WebButton>(true))
+                {
+                    if (sibling.transform.parent != link.transform.parent) continue;
+                    if (sibling.url == "https://youtube.com/c/Hakita" || sibling.url == "https://twitter.com/ULTRAKILLGame")
+                        removed.Add(sibling.transform as RectTransform);
+                }
+                ConfigureCommunity(rect, caption, removed.ToArray());
+                link.url = "https://t.me/RYAZHENKACFW"; link.gameObject.name = "NX Community";
+                found = true;
             }
+            return found;
+        }
+
+        // Reuse the entire original social row, rather than squeezing a channel
+        // name into a 100px icon slot. Parent-local corners also respect scaling.
+        internal static void ConfigureCommunity(RectTransform keeper, TMP_Text caption, RectTransform[] removed)
+        {
+            var parent = keeper.parent as RectTransform;
+            if (!parent) return;
+            var corners = new Vector3[4];
+            Vector2 min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            Vector2 max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+            void Include(RectTransform slot)
+            {
+                if (!slot || slot.parent != parent) return;
+                slot.GetWorldCorners(corners);
+                foreach (var corner in corners)
+                {
+                    Vector2 point = parent.InverseTransformPoint(corner);
+                    min = Vector2.Min(min, point); max = Vector2.Max(max, point);
+                }
+            }
+            Include(keeper); foreach (var slot in removed) Include(slot);
+            foreach (var slot in removed) if (slot && slot != keeper) slot.gameObject.SetActive(false);
+            keeper.anchorMin = keeper.anchorMax = keeper.pivot = new Vector2(0, 1);
+            keeper.sizeDelta = max - min;
+            keeper.anchoredPosition = new Vector2(min.x - parent.rect.xMin, max.y - parent.rect.yMax);
+            caption.rectTransform.anchorMin = Vector2.zero; caption.rectTransform.anchorMax = Vector2.one;
+            caption.rectTransform.offsetMin = new Vector2(6, 0); caption.rectTransform.offsetMax = new Vector2(-6, 0);
+            caption.text = "<mark=#000000>Telegram: @RYAZHENKACFW</mark>";
+            caption.richText = true; caption.enableWordWrapping = false;
+            caption.enableAutoSizing = true; caption.fontSizeMin = 18; caption.fontSizeMax = 24;
+            caption.overflowMode = TextOverflowModes.Overflow;
+            caption.alignment = TextAlignmentOptions.Center; caption.raycastTarget = false;
         }
         void OnApplicationFocus(bool value) { if (!value && pending.Count != 0) Flush(); }
-        void OnDisable() { if (pending.Count != 0) Flush(); }
+        void OnDisable() { SceneManager.sceneLoaded -= SceneLoaded; if (pending.Count != 0) Flush(); }
+        void OnDestroy() { foreach (var definition in definitions) if (definition) Destroy(definition); }
+    }
+    public sealed class NxSettingsLabel : MonoBehaviour
+    {
+        TMP_Text label; Func<string> render;
+        public void Bind(TMP_Text target, Func<string> value) { label = target; render = value; Refresh(); }
+        void Refresh() { if (label && render != null) label.text = render(); }
+        void OnEnable() { NxLoc.LanguageChanged += Refresh; Refresh(); }
+        void OnDisable() { NxLoc.LanguageChanged -= Refresh; }
     }
 }

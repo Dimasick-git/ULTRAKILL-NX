@@ -1,0 +1,33 @@
+{
+  "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK",
+  "commit": "54fbaafdc34716811751bea5032700e78f5a0f33",
+  "tag": "v1.1.3",
+  "files": {
+    "src/shared/ffx_object_management.cpp": "607b93de58b16eaa891056b6664d719699c83f8ba9e039aa1a9e44fcecd1ab09",
+    "src/shared/ffx_object_management.h": "e388d1af28f4d3f7388e524257b9692be867884cff720414031d9768995bf223",
+    "include/FidelityFX/host/ffx_interface.h": "95fac8f4307222cca69dba8d92ea8ecc65210ce8da10f643f8449448c7205362",
+    "include/FidelityFX/host/ffx_error.h": "5a9e3dc490371f6b9a6acf5419cf87297ab057b487ec6bcc4f41f6c94b000e61",
+    "include/FidelityFX/host/ffx_types.h": "2eef22a4ada06958bd362f80da43c888b3e1daf9f0414c6fa8fdd6979d9aa6e2",
+    "include/FidelityFX/host/ffx_assert.h": "d64fb7b916773d2ac96903fc699e438099b8702ecf5ce7aba051bd7e0a109ee1",
+    "include/FidelityFX/host/ffx_util.h": "efe50400378277356116f0a3989ec69367b08aaae65892fdf3a4cf931a4c7bb8",
+    "src/components/frameinterpolation/ffx_frameinterpolation_private.h": "e14534f233c2f824361f303fe9df82a2959dc871a482c064601cda5cc009f150",
+    "include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_resources.h": "aa9daea4d768cdc014de54bd42890673ffdef2d7d8cf796c986c2b873ad98ac9",
+    "src/components/frameinterpolation/ffx_frameinterpolation.cpp": "a2765d6dbc6c8fa0801ad39c6c67a7ffa137937522bb173110c8e761677ec8ae",
+    "include/FidelityFX/gpu/spd/ffx_spd.h": "d276f32ee18948cb053c991f3c8821f9664c93f12cb2483dd2978f333bca67b2",
+    "include/FidelityFX/gpu/ffx_core.h": "e439aa5f516b2d2ebf070ff1d24561f04fa5f00262a2e4f760764a7d07de7997",
+    "include/FidelityFX/gpu/ffx_core_portability.h": "a7c3a1c213ec083bec401181036cffe7a222af2c430c0bab6bd8c14e83e8a567",
+    "include/FidelityFX/gpu/ffx_core_gpu_common_half.h": "5b99b31864a7afe6d5c19064c3c261d9ff77ce7deaf0ae9903fdda64cb48fa8e",
+    "include/FidelityFX/gpu/ffx_core_gpu_common.h": "d1a9c8b0a77592047f354bd8caf0f775690e8e8399892a36f7934c52e5bc5deb",
+    "include/FidelityFX/gpu/ffx_core_hlsl.h": "98722d4b1331c437f5aee645e6f12ed722b721f2ffcb0ec523ee817857f394c7",
+    "include/FidelityFX/gpu/ffx_core_glsl.h": "01afe5b65549b2c0951b494ca4bf570ee2aa89a64344e4c7d98ef86e6613ab42",
+    "include/FidelityFX/gpu/ffx_core_cpu.h": "bdb58574cf3ba80803c4198b4661e3a1cd63c877d59833f22bf15962b164a7fe",
+    "include/FidelityFX/gpu/ffx_common_types.h": "a19560f837c09f0c990e98b5925b731135d908e372af41c5895cbfa70cc9e5c8",
+    "include/FidelityFX/host/ffx_frameinterpolation.h": "a431f943fd1bcf3425036c43a8a7b97fa48e8884a756f38ef6b6a4d14a81be06",
+    "src/components/opticalflow/ffx_opticalflow_private.h": "7ec5a22c60d5525b1276442e6793c70b0f9ca7770484a4cef1b37031b27a9215",
+    "include/FidelityFX/gpu/opticalflow/ffx_opticalflow_resources.h": "cbb2a75305c6bb45d8efd2dd5b4e471529afed9005a8003eed39a330f2cfa079",
+    "src/components/opticalflow/ffx_opticalflow.cpp": "4a207f08894f80a4efd99d9b90c91762e0f62065ef073aa2f788b791545dbfc2",
+    "include/FidelityFX/gpu/opticalflow/ffx_opticalflow_callbacks_hlsl.h": "9161766e8f639d573591362822b4ff6a06dbbbda4e412ce80d6b7fb12504260b",
+    "include/FidelityFX/gpu/opticalflow/ffx_opticalflow_common.h": "9d4b9466bf831e7d4a9c1c3e5e61af4977582c4e24439751eca8b866feadb33a",
+    "include/FidelityFX/host/ffx_opticalflow.h": "efe99c1a3ea28b7378ed65be369a6582bbe2eaf36d37cbd40bf740bdc224bd78"
+  }
+}

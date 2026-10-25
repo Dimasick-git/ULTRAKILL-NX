@@ -2,6 +2,8 @@
 <linker>
   <assembly fullname="Assembly-CSharp">
     <type fullname="CameraController" preserve="all"/>
+    <type fullname="ControllerPointer" preserve="all"/>
+    <type fullname="PostProcessV2_Handler" preserve="all"/>
   </assembly>
   <assembly fullname="NxPort" preserve="all"/>
   <assembly fullname="UnityEngine.CoreModule">

@@ -17,41 +17,11 @@
 #include "config.h"
 #include "nx_gameroot.h"
 
-// Thread-safe, file-only logger. We open+flush+close on every call so the last
-// lines survive a hard crash, and serialise with a mutex because the engine
-// logs from several worker threads. No nxlink/socket: this must work on bare
-// hardware. The log lands in the game dir (main() chdir()s there at startup).
-#if DEBUG_LOG
-static Mutex g_log_lock; // libnx Mutex: 0 == unlocked, no init needed
-#endif
-
 int debugPrintf(char *text, ...) {
-#if DEBUG_LOG
-  static FILE *f = NULL;
+  extern int nx_log_printf(const char *,va_list);
   va_list list;
-  mutexLock(&g_log_lock);
-  if (!f) f = fopen(game_log_path(), "a");   // open once, keep open (SD fopen/close per line is very slow)
-                                             // path is resolved at runtime -- see nx_gameroot.c
-  if (f) {
-    va_start(list, text);
-    vfprintf(f, text, list);
-    va_end(list);
-    /* Per-line SD flushes stall the main thread during bursts of Unity logs.
-     * Keep at most one second buffered; fatal/watchdog diagnostics flush now. */
-    static uint64_t last_flush = 0;
-    const uint64_t now = armGetSystemTick();
-    if (!last_flush || now - last_flush >= armNsToTicks(1000000000ULL) ||
-        strstr(text, "FAIL") || strstr(text, "fatal") || strstr(text, "abort") ||
-        strstr(text, "[wd]")) {
-      fflush(f);
-      last_flush = now;
-    }
-  }
-  mutexUnlock(&g_log_lock);
-#else
-  (void)text;
-#endif
-  return 0;
+  va_start(list,text);int result=nx_log_printf(text,list);va_end(list);
+  return result;
 }
 
 // Per-thread bionic TLS. The engine reads its stack canary from tpidr_el0+0x28;

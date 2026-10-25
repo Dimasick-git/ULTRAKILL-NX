@@ -10,8 +10,10 @@ length, segment). UnityPy читает только сегмент 0 и разв
 """
 
 import struct
+import os
 import sys
 
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import lz4.block  # noqa: E402  (ставится вместе с UnityPy)
 
 # Платформы ShaderCompilerPlatform и типы программ ShaderGpuProgramType (2022.3)

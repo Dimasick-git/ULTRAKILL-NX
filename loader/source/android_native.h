@@ -1,19 +1,14 @@
-/* android_native.h -- NativeActivity / native_app_glue host for libcrx.so
+/* android_native.h -- NDK NativeActivity types, kept from the base loader
+ * (cr3_nx, a NativeActivity host).
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
  *
- * Chaos Rings 3's engine is a NativeActivity game: ANativeActivity_onCreate()
- * (the app-glue, statically linked inside libcrx.so) spawns a thread running
- * the developer's android_main(), which polls an ALooper for lifecycle commands
- * and input. This module provides the host side of that contract:
- *   - the ANativeActivity struct + ANativeActivityCallbacks the glue fills in
- *   - a working ALooper (prepare/addFd/pollOnce) over an in-process fake-fd
- *     layer (the glue's command pipe and the input queue register fds here)
- *   - an AInputQueue we feed Switch HID events into
- *   - AConfiguration / ASensor / ANativeWindow shims
- * The ABI of ANativeActivity{,Callbacks} and the A* functions must match the
- * NDK exactly because the glue inside libcrx.so reads/writes these directly.
+ * libunity is not a NativeActivity: the engine is driven through its JNI
+ * natives, and the NDK functions it does import live in android_native_unity.c
+ * and ndk_stubs.c. This header remains for the shared NDK typedefs and the
+ * fake-fd helpers. The ABI of ANativeActivity{,Callbacks} and the A* functions
+ * must match the NDK exactly.
  */
 
 #ifndef __ANDROID_NATIVE_H__

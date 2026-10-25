@@ -1,0 +1,100 @@
+{
+  "version": "r93",
+  "languages": {
+    "ru": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2287,
+      "review": "existing Russian translation",
+      "tsv_rows": 5025,
+      "tsv_sha256": "144ec685130ba6c2797a26eb701860efc6dab39796bbaaf231366b46d0d3bddb"
+    },
+    "uk": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2268,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5107,
+      "tsv_sha256": "e2101a3a73b7cf061200f4b451ad3b55b9ad13e10cb25c49b5a67277b965ae7f"
+    },
+    "de": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2067,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 4793,
+      "tsv_sha256": "ae758fdb99e6d5b5581a663187eeb2a68d33efac692ee45b02c845b6d2ba6517"
+    },
+    "fr": {
+      "eligible_rows": 2395,
+      "differing_from_english": 1945,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 4612,
+      "tsv_sha256": "9871406c28d7d622a273b560e4b5b4e0c4988f42a6b6d816ba79141eda102d4b"
+    },
+    "es": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2302,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5212,
+      "tsv_sha256": "c16bb9c1bc505b0782cae4c83c063c1df99b259981d564f67a6255646f3a2c6f"
+    },
+    "pt-BR": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2244,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5086,
+      "tsv_sha256": "e933e0b42b38c05ed8dc70c316834bf3d3683c1ae62c43cd78b3eab27086da9b"
+    },
+    "it": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2292,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5226,
+      "tsv_sha256": "ed6bcd0300dc50f076b10f60ba9c1290281aa9b75f25b893363edafc218b7d9d"
+    },
+    "pl": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2248,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5090,
+      "tsv_sha256": "092b8e41e78d800ec2cb1963277e291d6c7591874ec4f472197646f21754d01d"
+    },
+    "tr": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2259,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5098,
+      "tsv_sha256": "cf0ac70cf4de3c5e99e593ad4690d01b97cb325b603b56e143b99ce1d9ed5a1b"
+    },
+    "ja": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2269,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5125,
+      "tsv_sha256": "5d0b4fb4ff840e4db635f9acda7b87d47ecbdde81cf344ee83c32bc61163f838",
+      "cjk_glyph_coverage": "pass"
+    },
+    "ko": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2282,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5141,
+      "tsv_sha256": "7809162c8faae2954f98f69c2160ffc4deba85bbe2d2010e246ea183caa7c095",
+      "cjk_glyph_coverage": "pass"
+    },
+    "zh-Hans": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2283,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5158,
+      "tsv_sha256": "8f27b2fb7fae423e3d9c0da62fb1ca0ae54e5b8e83d4d032ee0dc51cbaee8852",
+      "cjk_glyph_coverage": "pass"
+    },
+    "zh-Hant": {
+      "eligible_rows": 2395,
+      "differing_from_english": 2283,
+      "review": "machine draft; partial review; native-speaker review pending",
+      "tsv_rows": 5158,
+      "tsv_sha256": "23ee650cf547e1cf2dcc13686516a38f377b6f20e68dc7408470c9f5667e88ea",
+      "cjk_glyph_coverage": "pass"
+    }
+  }
+}

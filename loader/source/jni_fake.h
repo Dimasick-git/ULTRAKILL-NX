@@ -1,12 +1,7 @@
-/* jni_fake.h -- fake JNI environment for the MVGL engine (libcrx.so)
- *
- * libcrx.so is a NativeActivity app: the glue hands it the JavaVM + activity
- * jobject from the ANativeActivity struct, and the engine then drives three
- * Java helpers entirely through JNI:
- *   local/mediav/Text2Bitmap   -> draw text into an android.graphics.Bitmap
- *   local/mediav/MoviePlayer   -> FMV playback
- *   local/mediav/MyNativeActivity -> asset manager, orientation, IME, store...
- * We provide a functional JNIEnv/JavaVM so those calls resolve to native code.
+/* jni_fake.h -- fake JNI environment (JavaVM / JNIEnv) for the game's Android
+ * libraries, so their Java calls resolve to native code. Unity and input
+ * classes are handled by unity_jni.c / unity_input.c; the Text2Bitmap /
+ * MoviePlayer handlers kept from the base loader are unused (cr3_stubs.c).
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.

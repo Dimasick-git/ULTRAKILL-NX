@@ -24,11 +24,22 @@ typedef struct {uint64_t addr,size;unsigned perm;} MemoryInfo;
 enum {ThreadActivity_Paused=1,ThreadActivity_Runnable=0,Perm_R=1};
 #define R_FAILED(x) ((x)!=0)
 static int paused[260],missing,fail_pause,fail_context,fail_query,no_read;
+static int heap_depth,gc_logging;
+static void nx_log_gc_enter(void){assert(!gc_logging);gc_logging=1;}
+static void nx_log_gc_leave(void){
+  assert(gc_logging&&!heap_depth);
+  for(int i=1;i<255;i++)assert(!paused[i]);
+  gc_logging=0;
+}
+static void __malloc_lock(void *unused){(void)unused;assert(gc_logging&&!heap_depth);for(int i=1;i<255;i++)assert(!paused[i]);heap_depth=1;}
+static void __malloc_unlock(void *unused){(void)unused;assert(heap_depth);heap_depth=0;}
 static uintptr_t only_register_root=0x123456789abcULL;
 static uint32_t diag_find_thread_handle(uintptr_t t){return t==missing?0:(uint32_t)t;}
-static Handle threadGetCurHandle(void){return 255;}
+static Handle current_handle=255;
+static Handle threadGetCurHandle(void){return current_handle;}
 static int svcSetThreadActivity(Handle h,int state){
   assert(h<260);if(h==fail_pause&&state==ThreadActivity_Paused)return -1;
+  if(state==ThreadActivity_Paused)assert(heap_depth&&gc_logging);
   paused[h]=state==ThreadActivity_Paused;return 0;
 }
 static int svcGetThreadContext3(ThreadContext*c,Handle h){
@@ -49,6 +60,11 @@ int main(void){
   assert(nxb_gc_pause(1,&sp)==EINVAL&&!paused[1]);
   assert(!nxb_gc_begin()&&!nx_gc_snapshot_begin());
   assert(!nxb_gc_pause(1,&sp)&&paused[1]&&sp==0x100000);
+  ThreadContext sampled;unsigned sampled_phase=0;current_handle=254;
+  assert(nx_gc_snapshot_collector(&sampled,&sampled_phase,NULL)&&sampled_phase==2);
+  assert(paused[1]&&!paused[255]);
+  fail_context=255;assert(!nx_gc_snapshot_collector(&sampled,&sampled_phase,NULL));
+  assert(paused[1]&&!paused[255]);fail_context=0;current_handle=255;
   const uintptr_t *roots=nxb_gc_roots(1,&words);
   assert(roots&&words==sizeof(ThreadContext)/sizeof(uintptr_t)&&roots[19]==only_register_root&&roots[29]==0x100800);
   assert(roots[30]==only_register_root+8&&roots[32]==only_register_root+16);
@@ -59,6 +75,7 @@ int main(void){
   assert(!nxb_gc_roots(1,&words)&&!words);
   assert(!nxb_gc_resume(2)&&!paused[2]);nxb_gc_end();
   assert(nx_gc_snapshot_begin());nx_gc_snapshot_end();
+  assert(!heap_depth&&!gc_logging);
   for(int failure=1;failure<=5;failure++){
     assert(!nxb_gc_begin());assert(!nxb_gc_pause(1,&sp));
     if(failure==1)missing=2;

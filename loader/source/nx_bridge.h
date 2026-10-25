@@ -55,6 +55,10 @@ float nxb_config_float(const char *key);
 int nxb_config_set(const char *key, float value);
 void  nxb_log(const char *msg);
 void nxb_loading(int active);
+unsigned nxb_memory_trim(int request);
+void nxb_memory_trim_render(void);
+void nxb_render_fault_report(unsigned faults);
+unsigned nxb_render_faults(void);
 void nxb_fsr_applied(int width,int height,int output_width,int output_height,int active);
 
 #endif

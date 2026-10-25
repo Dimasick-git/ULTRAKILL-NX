@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
+#include <malloc.h>
 #include "nx_gc.h"
+#include "nx_frame.h"
 #include "diag.h"
 
 #define GC_SLOTS 128
@@ -19,6 +21,35 @@ static GcSlot slots[GC_SLOTS];
 static Mutex pause_gate;
 static int active, ready;
 static unsigned stop_count;
+static Mutex owner_gate;
+Handle nx_gc_collector_handle;
+NxGcLockTrace nx_gc_lock_trace;
+static unsigned phase;
+static int heap_locked;
+static uint64_t stw_begin; /* длительность паузы GC -> [frame-wait], без журнала внутри паузы */
+extern void nx_log_gc_enter(void), nx_log_gc_leave(void);
+
+/* Do not resume any mutator to diagnose a collector stall. Only the collector
+ * itself is sampled, and is running again before the caller formats output. */
+int nx_gc_snapshot_collector(ThreadContext *context, unsigned *at_phase, NxGcLockTrace *trace) {
+  if (!mutexTryLock(&owner_gate)) return 0;
+  int okay = 0;
+  Handle collector=__atomic_load_n(&nx_gc_collector_handle,__ATOMIC_RELAXED);
+  if (active && collector && collector != threadGetCurHandle()) {
+    if (!R_FAILED(svcSetThreadActivity(collector, ThreadActivity_Paused))) {
+      okay = !R_FAILED(svcGetThreadContext3(context, collector));
+      if(trace) {
+        trace->address=__atomic_load_n(&nx_gc_lock_trace.address,__ATOMIC_RELAXED);
+        trace->caller=__atomic_load_n(&nx_gc_lock_trace.caller,__ATOMIC_RELAXED);
+        if(trace->address)trace->owner=__atomic_load_n((uint32_t *)trace->address,__ATOMIC_RELAXED);
+      }
+      svcSetThreadActivity(collector, ThreadActivity_Runnable);
+    }
+    *at_phase = __atomic_load_n(&phase, __ATOMIC_RELAXED);
+  }
+  mutexUnlock(&owner_gate);
+  return okay;
+}
 
 int nxb_gc_bridge_init(unsigned abi) {
   int supported = abi == 1;
@@ -32,7 +63,20 @@ void nx_gc_snapshot_end(void) { mutexUnlock(&pause_gate); }
 
 int nxb_gc_begin(void) {
   mutexLock(&pause_gate);
+  stw_begin = armGetSystemTick();
+  mutexLock(&owner_gate);
+  __atomic_store_n(&nx_gc_collector_handle,threadGetCurHandle(),__ATOMIC_RELAXED);
   active = 1;
+  __atomic_store_n(&phase, 1, __ATOMIC_RELAXED);
+  mutexUnlock(&owner_gate);
+  nx_log_gc_enter();
+  /* Newlib malloc is shared with the guest and the SD logger. Suspending a
+   * mutator while it owns that lock strands GC allocations behind a thread
+   * which cannot run until GC completes. Acquire it BEFORE suspending anyone.
+   * The linked libnx implementation is recursive, so GC may allocate itself. */
+  __malloc_lock(NULL);
+  heap_locked = 1;
+  __atomic_store_n(&phase, 2, __ATOMIC_RELAXED);
   __atomic_fetch_add(&stop_count, 1, __ATOMIC_RELAXED);
   return 0;
 }
@@ -46,6 +90,7 @@ static GcSlot *find(uintptr_t thread) {
 /* Used on failure too: never abort/log with unrelated threads left suspended. */
 void nxb_gc_end(void) {
   if (!active) return;
+  mutexLock(&owner_gate);
   for (unsigned i = 0; i < GC_SLOTS; ++i) {
     if (slots[i].paused) {
       svcSetThreadActivity(slots[i].handle, ThreadActivity_Runnable);
@@ -53,6 +98,12 @@ void nxb_gc_end(void) {
     }
   }
   active = 0;
+  __atomic_store_n(&nx_gc_collector_handle,0,__ATOMIC_RELAXED);
+  mutexUnlock(&owner_gate);
+  if (heap_locked) { heap_locked = 0; __malloc_unlock(NULL); }
+  nx_frame_add_gc(armGetSystemTick() - stw_begin);
+  /* Logging can acquire ordinary locks again only AFTER all mutators resume. */
+  nx_log_gc_leave();
   mutexUnlock(&pause_gate);
 }
 
@@ -85,6 +136,7 @@ int nxb_gc_pause(uintptr_t thread, uintptr_t *sp) {
 }
 
 int nxb_gc_resume(uintptr_t thread) {
+  __atomic_store_n(&phase, 4, __ATOMIC_RELAXED);
   GcSlot *slot = find(thread);
   if (!active || !slot) { nxb_gc_end(); return EINVAL; }
   if (R_FAILED(svcSetThreadActivity(slot->handle, ThreadActivity_Runnable))) {
@@ -95,6 +147,7 @@ int nxb_gc_resume(uintptr_t thread) {
 }
 
 const uintptr_t *nxb_gc_roots(uintptr_t thread, size_t *words) {
+  __atomic_store_n(&phase, 3, __ATOMIC_RELAXED);
   GcSlot *slot = find(thread);
   _Static_assert(sizeof(ThreadContext) % sizeof(uintptr_t) == 0, "GC register context word alignment");
   *words = slot ? sizeof(ThreadContext)/sizeof(uintptr_t) : 0;

@@ -4,9 +4,11 @@
     python find_object.py <папка бандлов> <CAB-имя> [pathid]
 """
 
+import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, os.environ.get("UNITYPY_PATH", os.path.expanduser("~/uk-tools/pylib")))
 import UnityPy  # noqa: E402
 
 folder, cab = Path(sys.argv[1]), sys.argv[2].lower()

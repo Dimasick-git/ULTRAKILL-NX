@@ -1,7 +1,7 @@
 {
     "name": "NxPort",
     "rootNamespace": "NxPort",
-    "references": [],
+    "references": ["FidelityFX.FSR"],
     "includePlatforms": [
         "Editor",
         "Android",

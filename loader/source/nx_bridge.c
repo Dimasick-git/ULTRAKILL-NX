@@ -12,10 +12,9 @@
  * плашмя -- локальная ось рыскания у этих хватов разная, а мировая одна.
  * Тангаж -- вокруг поперечной оси самого контроллера.
  *
- * ЗНАКИ. Поперечная ось и знак тангажа взяты из nx_pointer порта Papers,
- * Please, где они проверены на железе: у Pro-контроллера оси развёрнуты на
- * 180 градусов относительно Joy-Con. Проверка ULTRAKILL на железе показала
- * обратное направление обеих осей: gyro_invert_x/y по умолчанию равны 1.
+ * ЗНАКИ. У Pro-контроллера оси развёрнуты на 180 градусов относительно
+ * Joy-Con. Проверка на железе показала обратное направление обеих осей:
+ * gyro_invert_x/y по умолчанию равны 1.
  * Первые выборки пишутся в debug.log вместе с вектором «вверх». */
 
 #include <switch.h>
@@ -23,12 +22,35 @@
 #include <string.h>
 
 #include "nx_bridge.h"
+#include "nx_fg.h"
 #include "nx_render_control.h"
 #include "nx_gameroot.h"
 #include "nx_loading.h"
 #include <stdio.h>
 #include "config.h"
 #include "util.h"
+#include <GLES3/gl3.h>
+
+/* The request crosses threads; Mesa's slab lists are touched only by the
+ * current GLES render thread, after all preceding GPU work has finished. */
+extern uint64_t nouveau_nx_trim_memory(void);
+static unsigned trim_requested, trim_completed;
+static unsigned render_faults;
+void nxb_render_fault_report(unsigned faults) { __atomic_fetch_or(&render_faults, faults, __ATOMIC_RELAXED); }
+unsigned nxb_render_faults(void) { return __atomic_exchange_n(&render_faults, 0, __ATOMIC_ACQ_REL); }
+unsigned nxb_memory_trim(int request) {
+  return request ? __atomic_add_fetch(&trim_requested, 1, __ATOMIC_ACQ_REL)
+                 : __atomic_load_n(&trim_completed, __ATOMIC_ACQUIRE);
+}
+void nxb_memory_trim_render(void) {
+  unsigned ticket = __atomic_load_n(&trim_requested, __ATOMIC_ACQUIRE);
+  if (ticket == __atomic_load_n(&trim_completed, __ATOMIC_RELAXED)) return;
+  glFinish();
+  uint64_t bytes = nouveau_nx_trim_memory();
+  debugPrintf("[memory] transition trim #%u: unused Mesa slabs %llu KB\n", ticket,
+              (unsigned long long)(bytes >> 10));
+  __atomic_store_n(&trim_completed, ticket, __ATOMIC_RELEASE);
+}
 
 #define RAD2DEG       57.29577951308232f
 #define REV2DEG       360.0f      /* угловая скорость HID -- в оборотах/с */
@@ -225,13 +247,49 @@ int nxb_motion(NxbMotion *out) {
   return (int)out->valid;
 }
 
+/* Язык системы Switch -> номер языка текстов (порядок -- NxLocLanguages в
+ * NxLocalization.cs): 1 English, 2 Русский, 4 Deutsch, 5 Français, 6 Español,
+ * 7 Português, 8 Italiano, 11 日本語, 12 한국어, 13 简体中文, 14 繁體中文.
+ * Нидерландского нет -- английский. */
+static int system_language(void) {
+  u64 code = 0;
+  SetLanguage lang = SetLanguage_ENUS;
+  if (R_FAILED(setInitialize())) return 1;
+  const int ok = R_SUCCEEDED(setGetSystemLanguage(&code)) && R_SUCCEEDED(setMakeLanguage(code, &lang));
+  setExit();
+  if (!ok) return 1;
+  switch (lang) {
+    case SetLanguage_RU:                              return 2;
+    case SetLanguage_DE:                              return 4;
+    case SetLanguage_FR: case SetLanguage_FRCA:       return 5;
+    case SetLanguage_ES: case SetLanguage_ES419:      return 6;
+    case SetLanguage_PT: case SetLanguage_PTBR:       return 7;
+    case SetLanguage_IT:                              return 8;
+    case SetLanguage_JA:                              return 11;
+    case SetLanguage_KO:                              return 12;
+    case SetLanguage_ZHCN: case SetLanguage_ZHHANS:   return 13;
+    case SetLanguage_ZHTW: case SetLanguage_ZHHANT:   return 14;
+    default:                                          return 1;
+  }
+}
+
 int nxb_config_int(const char *key) {
   if (!key) return 0;
+  if (!strcmp(key, "ui_language"))   return config.ui_language;
+  if (!strcmp(key, "performance_mode")) return config.performance_mode;
+  if (!strcmp(key, "engine_profiler")) return config.engine_profiler;
+  if (!strcmp(key, "system_language")) return system_language();
   if (!strcmp(key, "gyro"))          return config.gyro;
   if (!strcmp(key, "gyro_invert_x")) return config.gyro_invert_x;
   if (!strcmp(key, "gyro_invert_y")) return config.gyro_invert_y;
   if (!strcmp(key, "docked_1080p"))  return config.docked_1080p;
   if (!strcmp(key, "fsr"))           return config.fsr;
+  if (!strcmp(key, "fsr3"))          return config.fsr3;
+  if (!strcmp(key, "fg_probe"))      return config.fg_probe;
+  if (!strcmp(key, "fg_available")) return nxb_fg_available();
+  if (!strcmp(key, "frame_generation")) return config.frame_generation;
+  if (!strcmp(key, "spawn_warmup")) return config.spawn_warmup;
+  if (!strcmp(key, "fg_runtime")) return nx_fg_runtime_state();
   if (!strcmp(key, "render_height")) return nx_render_height();
   if (!strcmp(key, "fsr_enabled")) return nx_render_filter();
   if (!strcmp(key, "loading_boost")) return config.loading_boost;
@@ -257,6 +315,7 @@ int nxb_config_set(const char *key, float value) {
   if (!strcmp(key,"gyro_sens") && value>=0.1f && value<=20) config.gyro_sens=value;
   else if (!strcmp(key,"render_height") && value>=180 && value<=720 && value==(int)value) { config.render_height=(int)value;render=1; }
   else if (!strcmp(key,"fsr_sharpness") && value>=0 && value<=2) { config.fsr_sharpness=value;render=1; }
+  else if (!strcmp(key,"ui_language") && value>=0 && value<=14 && value==(int)value) config.ui_language=(int)value;
   else if (value==0 || value==1) {
     int v=(int)value;
     if (!strcmp(key,"gyro")) config.gyro=v;
@@ -264,6 +323,17 @@ int nxb_config_set(const char *key, float value) {
     else if (!strcmp(key,"gyro_invert_y")) config.gyro_invert_y=v;
     else if (!strcmp(key,"loading_boost")) config.loading_boost=v;
     else if (!strcmp(key,"fsr")) { config.fsr=v;render=1; }
+    else if (!strcmp(key,"fsr3")) {
+#if !NX_EXPERIMENTAL_FRAMEGEN
+      if (v) return 0;
+#endif
+      config.fsr3=v;
+    }
+    else if (!strcmp(key,"frame_generation")) {
+      if (v && !nxb_fg_available()) return 0;
+      config.frame_generation=v;
+    }
+    else if (!strcmp(key,"spawn_warmup")) config.spawn_warmup=v;
     else return 0;
   } else return 0;
   if (render) {
@@ -294,6 +364,7 @@ int nxb_config_set(const char *key, float value) {
     config=before;remove(temp);return 0;
   }
   if (render) nx_render_config_changed();
+  if (!strcmp(key,"frame_generation") && before.frame_generation!=config.frame_generation) nx_fg_settings_changed();
   if (!strcmp(key,"loading_boost")) nx_loading_settings_changed();
   return 1;
 }

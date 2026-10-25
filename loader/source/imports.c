@@ -1,15 +1,17 @@
-/* imports.c -- dynamic-symbol resolution for libcrx.so + libc++_shared.so
+extern void nxb_fps_request(int);
+/* imports.c -- dynamic-symbol resolution for the game's Android libraries
+ * (libmain, libunity, libil2cpp and their libc++_shared).
  *
  * Copyright (C) 2021 fgsfds, Andy Nguyen (FF4 base)
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
  *
- * The MVGL engine pulls its C++ runtime from libc++_shared.so, so most std:: /
- * operator-new / __cxa imports resolve module-to-module. What is satisfied here:
- * a large libc subset (shimmed where bionic != newlib), GLES2 + EGL (mesa),
- * OpenSL ES (our shim), the libandroid NativeActivity API (android_native.c),
- * AAsset (data.c), AndroidBitmap (text2bitmap.c) and a few liblog/cxxabi helpers.
+ * std:: / operator-new / __cxa imports resolve module-to-module through
+ * libc++_shared.so. What is satisfied here: a large libc subset (shimmed where
+ * bionic != newlib), GLES + EGL (mesa), OpenSL ES (our shim), the NDK surface
+ * (android_native_unity.c, ndk_stubs.c) and a few liblog/cxxabi helpers. The
+ * Unity-only additions live in unity_imports.c.
  */
 
 #define _GNU_SOURCE
@@ -21,6 +23,9 @@
 #include <string.h>
 #include <strings.h>
 #include <malloc.h>
+#include "nx_alloc_diag.h"
+#include "nx_fg_runtime.h"
+#include "nx_fg.h"
 extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-safe, unity_imports.c */
 #include <unistd.h>
 #include <ctype.h>
@@ -35,6 +40,7 @@ extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-sa
 #include <sys/stat.h>
 #include <dirent.h>
 #include <EGL/egl.h>
+#include "nx_warp.h"
 #include <GLES2/gl2.h>
 #include <switch.h>
 #include "diag.h"
@@ -51,10 +57,15 @@ extern int z_strncasecmp(const char *, const char *, unsigned long);  /* NULL-sa
 #include "nx_perf.h"
 #include "nx_video.h"
 #include "nx_gc.h"
+#include "nx_sync_registry.h"
 #include "nx_shader_diag.h"
+#include "nx_gameroot.h"   /* game_root: UnityShaderCache */
 #include "nx_log_repeat.h"
+#include "nx_frame.h"
 extern void nxb_exception_trace(void);
+extern void nxb_raise_trace(const char *kind);
 extern void nxb_nullcheck_site(const char *, int);
+extern void nxb_bounds_site(const char *, int, uint32_t, uint32_t, uintptr_t);
 
 extern int *__errno(void);              // newlib
 
@@ -71,6 +82,19 @@ static int log_allowed(int prio) {
 }
 uint32_t g_port_exceptions;
 static void android_log_message(const char *tag, const char *text) {
+  if (text && tag && !strcmp(tag, "Unity") && strstr(text, "OPENGL NATIVE PLUG-IN ERROR") &&
+      (strstr(text, "GL_INVALID_FRAMEBUFFER_OPERATION") || strstr(text, "GL_OUT_OF_MEMORY"))) {
+    nxb_render_fault_report(strstr(text, "GL_OUT_OF_MEMORY") ? 2u : 1u);
+    static Mutex fault_lock;
+    static NxLogRepeat faults;
+    unsigned suppressed;
+    mutexLock(&fault_lock);
+    int emit = nx_log_repeat(&faults, text, armGetSystemTick(), armNsToTicks(5000000000ULL), &suppressed);
+    if (suppressed) debugPrintf("[gfx-fault] repeated=%u; repair signalled to renderer\n", suppressed);
+    if (emit) debugPrintf("%s: %s\n", tag, text);
+    mutexUnlock(&fault_lock);
+    return;
+  }
   if (text && tag && !strcmp(tag, "Unity") && strstr(text, "Exception")) {
     __atomic_fetch_add(&g_port_exceptions, 1, __ATOMIC_RELAXED);
     static Mutex repeat_lock;
@@ -137,92 +161,106 @@ FILE *stderr_fake = (FILE *)&fake_sF[2];
 // caller's pointer slot.
 // ---------------------------------------------------------------------------
 
-/* Bionic storage may be only 4-byte aligned (Baselib embeds it at +4), so
- * do not publish an 8-byte pointer with an exclusive atomic instruction.
- * Serialize lazy initialization: two different mutexes for one Android slot
- * let both callers enter Unity's allocator and corrupt its intrusive lists. */
-static Mutex g_sync_init_lock;
-
+/* Android pthread storage may be only 4-byte aligned. Resolve backing objects
+ * by storage address in a lock-free registry; do not serialize every lock and
+ * unlock through an initialization mutex which GC can suspend its owner in. */
+#define NX_SYNC_LIVE 0x4e580001u
 int pthread_mutex_init_fake(pthread_mutex_t **uid, const int *attr) {
-  pthread_mutex_t *m = calloc(1, sizeof(pthread_mutex_t));
-  if (!m) return -1;
+  if (!uid) return EINVAL;
+  if (nx_sync_lookup(uid)) return 0;
+  pthread_mutex_t *m = calloc(1, sizeof(*m));
+  if (!m) return ENOMEM;
   const int type = attr ? (*attr & 3) : 0;
   int ret;
   if (type == 1 || type == 2) {
     pthread_mutexattr_t a; pthread_mutexattr_init(&a);
     pthread_mutexattr_settype(&a, type == 1 ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_ERRORCHECK);
     ret = pthread_mutex_init(m, &a); pthread_mutexattr_destroy(&a);
-  } else {
-    ret = pthread_mutex_init(m, NULL);
-  }
-  if (ret != 0) { free(m); return -1; }
-  *uid = m; return 0;
-}
-int pthread_mutex_destroy_fake(pthread_mutex_t **uid) {
-  if (uid && *uid && (uintptr_t)*uid > 0x8000) { pthread_mutex_destroy(*uid); free(*uid); *uid = NULL; }
+  } else ret = pthread_mutex_init(m, NULL);
+  if (ret != 0) { free(m); return ret; }
+  pthread_mutex_t *winner=nx_sync_publish(uid,m);
+  if(winner!=m){pthread_mutex_destroy(m);free(m);}
+  if(!winner)return ENOMEM;
+  __atomic_store_n((uint32_t *)uid,NX_SYNC_LIVE,__ATOMIC_RELEASE);
   return 0;
 }
-static int ensure_mutex(pthread_mutex_t **uid) {
-  // A real (already-initialized) handle is a heap pointer; anything small is a
-  // bionic static initializer left in place: 0 = normal, 0x4000 = recursive,
-  // 0x8000 = errorcheck, etc. Back ALL of those with a real newlib mutex.
-  // (Was only handling 0 and 0x4000 -> a 0x8000 errorcheck static was treated
-  // as a valid pointer and locked at address 0x8000: wild deref / hang.)
-  int r = 0;
-  mutexLock(&g_sync_init_lock);
-  if ((uintptr_t)*uid < 0x10000) {
-    int a = ((uintptr_t)*uid >> 14) & 3;
-    r = pthread_mutex_init_fake(uid, &a);
-  }
-  mutexUnlock(&g_sync_init_lock);
-  return r;
+int pthread_mutex_destroy_fake(pthread_mutex_t **uid) {
+  if(!uid)return EINVAL;
+  pthread_mutex_t *m=nx_sync_lookup(uid);
+  if(!m)return 0;
+  int result=pthread_mutex_destroy(m);
+  if(result)return result;
+  nx_sync_remove(uid);free(m);
+  __atomic_store_n((uint32_t *)uid,0,__ATOMIC_RELEASE);
+  return 0;
+}
+static pthread_mutex_t *ensure_mutex(pthread_mutex_t **uid) {
+  if(!uid)return NULL;
+  pthread_mutex_t *m=nx_sync_lookup(uid);
+  if(m)return m;
+  uint32_t initial=__atomic_load_n((uint32_t *)uid,__ATOMIC_ACQUIRE);
+  int a=(initial>>14)&3;
+  if(pthread_mutex_init_fake(uid,&a)!=0)return NULL;
+  return nx_sync_lookup(uid);
 }
 int pthread_mutex_lock_fake(pthread_mutex_t **uid) {
-  if (ensure_mutex(uid) < 0) return -1;
-  if (pthread_mutex_trylock(*uid) == 0) return 0;        // uncontended: no beacon
-  diag_wait_enter(DIAG_W_MUTEX, *uid);
-  int r = pthread_mutex_lock(*uid);
-  diag_wait_exit();
-  return r;
+  pthread_mutex_t *m=ensure_mutex(uid);if(!m)return ENOMEM;
+  if (pthread_mutex_trylock(m) == 0) return 0;
+  diag_wait_enter(DIAG_W_MUTEX,m);
+  int r=pthread_mutex_lock(m);diag_wait_exit();return r;
 }
-int pthread_mutex_trylock_fake(pthread_mutex_t **uid) { if (ensure_mutex(uid) < 0) return -1; return pthread_mutex_trylock(*uid); }
-int pthread_mutex_unlock_fake(pthread_mutex_t **uid) { if (ensure_mutex(uid) < 0) return -1; return pthread_mutex_unlock(*uid); }
+int pthread_mutex_trylock_fake(pthread_mutex_t **uid) {
+  pthread_mutex_t *m=ensure_mutex(uid);return m?pthread_mutex_trylock(m):ENOMEM;
+}
+int pthread_mutex_unlock_fake(pthread_mutex_t **uid) {
+  pthread_mutex_t *m=ensure_mutex(uid);return m?pthread_mutex_unlock(m):ENOMEM;
+}
 int pthread_mutex_timedlock_fake(pthread_mutex_t **uid, const struct timespec *abs) {
   (void)abs;
-  if (ensure_mutex(uid) < 0) return -1;
-  for (int i = 0; i < 1000; i++) {
-    if (pthread_mutex_trylock(*uid) == 0) return 0;
+  pthread_mutex_t *m=ensure_mutex(uid);if(!m)return ENOMEM;
+  for(int i=0;i<1000;i++) {
+    if(pthread_mutex_trylock(m)==0)return 0;
     svcSleepThread(1000000ull);
   }
   return ETIMEDOUT;
 }
-
 int pthread_cond_init_fake(pthread_cond_t **cnd, const int *attr) {
-  (void)attr;
-  pthread_cond_t *c = calloc(1, sizeof(pthread_cond_t));
-  if (!c) return -1;
-  if (pthread_cond_init(c, NULL) != 0) { free(c); return -1; }
-  *cnd = c; return 0;
+  (void)attr;if(!cnd)return EINVAL;
+  if(nx_sync_lookup(cnd))return 0;
+  pthread_cond_t *c=calloc(1,sizeof(*c));if(!c)return ENOMEM;
+  int result=pthread_cond_init(c,NULL);
+  if(result){free(c);return result;}
+  pthread_cond_t *winner=nx_sync_publish(cnd,c);
+  if(winner!=c){pthread_cond_destroy(c);free(c);}
+  if(!winner)return ENOMEM;
+  __atomic_store_n((uint32_t *)cnd,NX_SYNC_LIVE,__ATOMIC_RELEASE);
+  return 0;
 }
-static int ensure_cond(pthread_cond_t **cnd) {
-  // like ensure_mutex: any small value is a bionic static cond initializer that
-  // needs a real newlib object (was only treating 0 as needing init, so a
-  // non-zero sentinel was waited/signalled on as a garbage pointer).
-  int r = 0;
-  mutexLock(&g_sync_init_lock);
-  if ((uintptr_t)*cnd < 0x10000) r = pthread_cond_init_fake(cnd, NULL);
-  mutexUnlock(&g_sync_init_lock);
-  return r;
+static pthread_cond_t *ensure_cond(pthread_cond_t **cnd) {
+  if(!cnd)return NULL;
+  pthread_cond_t *c=nx_sync_lookup(cnd);
+  if(c)return c;
+  if(pthread_cond_init_fake(cnd,NULL)!=0)return NULL;
+  return nx_sync_lookup(cnd);
 }
-int pthread_cond_broadcast_fake(pthread_cond_t **cnd) { if (ensure_cond(cnd) < 0) return -1; return pthread_cond_broadcast(*cnd); }
-int pthread_cond_signal_fake(pthread_cond_t **cnd) { if (ensure_cond(cnd) < 0) return -1; return pthread_cond_signal(*cnd); }
-int pthread_cond_destroy_fake(pthread_cond_t **cnd) { if (cnd && (uintptr_t)*cnd >= 0x10000) { pthread_cond_destroy(*cnd); free(*cnd); *cnd = NULL; } return 0; }
+int pthread_cond_broadcast_fake(pthread_cond_t **cnd) {
+  pthread_cond_t *c=ensure_cond(cnd);return c?pthread_cond_broadcast(c):ENOMEM;
+}
+int pthread_cond_signal_fake(pthread_cond_t **cnd) {
+  pthread_cond_t *c=ensure_cond(cnd);return c?pthread_cond_signal(c):ENOMEM;
+}
+int pthread_cond_destroy_fake(pthread_cond_t **cnd) {
+  if(!cnd)return EINVAL;
+  pthread_cond_t *c=nx_sync_lookup(cnd);if(!c)return 0;
+  int result=pthread_cond_destroy(c);if(result)return result;
+  nx_sync_remove(cnd);free(c);__atomic_store_n((uint32_t *)cnd,0,__ATOMIC_RELEASE);
+  return 0;
+}
 int pthread_cond_wait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx) {
-  if (ensure_cond(cnd) < 0 || ensure_mutex(mtx) < 0) return -1;
-  diag_wait_enter(DIAG_W_COND, *cnd);
-  int r = pthread_cond_wait(*cnd, *mtx);
-  diag_wait_exit();
-  return r;
+  pthread_cond_t *c=ensure_cond(cnd);pthread_mutex_t *m=ensure_mutex(mtx);
+  if(!c || !m)return ENOMEM;
+  diag_wait_enter(DIAG_W_COND,c);
+  int r=pthread_cond_wait(c,m);diag_wait_exit();return r;
 }
 // Bound every timed cond-wait to at most COND_WAIT_CAP_MS. The .so libs (libc++
 // std::condition_variable, and Swappy's frame pacer) compute an ABSOLUTE deadline
@@ -236,7 +274,8 @@ int pthread_cond_wait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx) {
 // re-checks its predicate), so this is safe in general.
 #define COND_WAIT_CAP_MS 16
 int pthread_cond_timedwait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx, const struct timespec *t) {
-  if (ensure_cond(cnd) < 0 || ensure_mutex(mtx) < 0) return -1;
+  pthread_cond_t *c=ensure_cond(cnd);pthread_mutex_t *m=ensure_mutex(mtx);
+  if(!c || !m)return ENOMEM;
   struct timespec now, cap;
   clock_gettime(CLOCK_MONOTONIC, &now);
   long add = COND_WAIT_CAP_MS * 1000000L;
@@ -247,8 +286,8 @@ int pthread_cond_timedwait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx, con
   if (t && (t->tv_sec < cap.tv_sec ||
             (t->tv_sec == cap.tv_sec && t->tv_nsec <= cap.tv_nsec)))
     use = t;
-  diag_wait_enter(DIAG_W_COND, *cnd);
-  int r = pthread_cond_timedwait(*cnd, *mtx, use);
+  diag_wait_enter(DIAG_W_COND,c);
+  int r = pthread_cond_timedwait(c,m,use);
   diag_wait_exit();
   return r;
 }
@@ -465,7 +504,33 @@ static int utimensat_stub(int d, const char *p, const void *t, int f) { (void)d;
 static long sendfile_stub(int o, int i, long *off, size_t c) { (void)o; (void)i; (void)off; (void)c; return -1; }
 static void *fdopendir_stub(int fd) { (void)fd; return NULL; }
 static char *inet_ntoa_stub(uint32_t in) { (void)in; static char s[] = "0.0.0.0"; return s; }
-static void _exit_fake(int code) { (void)code; extern void NX_NORETURN __libnx_exit(int rc); __libnx_exit(0); }
+/* exit/_exit/abort из libunity/libil2cpp. Раньше они уходили в newlib exit,
+ * __libnx_exit и abort, а те возвращают управление в hbl -- форвардер NSP.
+ * Ему нечего запускать дальше, и он падает (User Break, 2347-0026): так
+ * выглядело «программа закрылась» при выходе посреди уровня. Как и конец
+ * главного цикла, завершаем процесс целиком через svcExitProcess: потоки
+ * движка ещё живы, и деинит libnx под ними роняет систему. В журнал --
+ * кто вызвал, чтобы отличить штатный выход от аварийного abort. */
+static void nx_describe_caller(char *buf, size_t n, const void *addr) {
+  so_module *m = so_find_module_by_addr(addr);
+  if (m) {
+    const char *base = m->name, *p;
+    for (p = m->name; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
+    snprintf(buf, n, "%s+0x%lx", base, (unsigned long)((uintptr_t)addr - (uintptr_t)m->load_virtbase));
+  } else {
+    snprintf(buf, n, "%p", addr);
+  }
+}
+void NX_NORETURN nx_exit_process(int code, const char *why, const void *caller) {
+  char where[128];
+  nx_describe_caller(where, sizeof where, caller);
+  debugPrintf("[exit] %s(%d) из %s -- завершаю процесс через svcExitProcess\n", why, code, where);
+  svcExitProcess();
+  __builtin_unreachable();
+}
+static void NX_NORETURN _exit_fake(int code) { nx_exit_process(code, "_exit", __builtin_return_address(0)); }
+static void NX_NORETURN abort_fake(void) { nx_exit_process(134, "abort", __builtin_return_address(0)); }
+void NX_NORETURN nx_exit_fake(int code) { nx_exit_process(code, "exit", __builtin_return_address(0)); }
 
 /* NULL-safe string ops. Unity's SystemInfo device-detection feeds the device
  * model/manufacturer (NULL in our fake JNI) straight into compare/search libc
@@ -536,10 +601,9 @@ extern int AndroidBitmap_unlockPixels(void *, void *);
 // GL shader fixups
 // ---------------------------------------------------------------------------
 
-// The MVGL "mono" composite shader assigns `monoCol` without declaring it.
-// Android's GL driver tolerated it; mesa's stricter GLSL ES compiler rejects it,
-// which kills the offscreen->screen copy and leaves the panel black. Inject the
-// missing declaration at upload time.
+// Kept from the base loader, whose engine had a composite shader assigning
+// `monoCol` without declaring it (mesa's GLSL ES compiler rejects that). Unity's
+// shaders never contain the pattern, so for this game it is a cheap no-op.
 static char *shader_fixups(const char *src) {
   const char *find = "monoCol = vec3";
   char *pos = strstr(src, find);
@@ -618,8 +682,81 @@ static void gl_DrawElements_log(GLenum m, GLsizei c, GLenum t, const void *i) { 
 volatile u64 g_swap_enter_tick = 0;
 
 
+/* Кэш собранных шейдеров. Unity сохраняет бинарники программ в
+ * <temporaryCachePath>/UnityShaderCache/ (у нас это корень игры, см. getCacheDir
+ * в unity_jni.c), только если GL_NUM_PROGRAM_BINARY_FORMATS > 0
+ * (HasBinaryProgram в libunity). Без кэша каждая программа собирается заново
+ * при каждом запуске: это 42 с компиляции и линковки за сессию и
+ * заминки до 314 мс. Запрос делается на потоке показа кадра, где контекст GL
+ * текущий. */
+/* Mesa собрана с дисковым кэшем (порт disk_cache.c под Horizon, см.
+ * third_party/mesa-nx). Объект кэша есть всегда, и тогда
+ * GL_NUM_PROGRAM_BINARY_FORMATS = 1: Unity хранит бинарники программ в
+ * UnityShaderCache. В бинарнике только TGSI, и nouveau заново собирает из
+ * него машинный код (5-30 мс на стадию) -- этот код Mesa кладёт в свой файловый
+ * кэш <корень>/mesa_shader_cache (нужен MESA_SHADER_CACHE_DIR).
+ * Ключ gl_program_cache: 0 -- всё выключено (MESA_SHADER_CACHE_DISABLE),
+ * 1 -- бинарники Unity + код nvc0, 2 -- ещё и GLSL-уровень кэша Mesa
+ * (MESA_SHADER_CACHE_GLSL; дублирует бинарники Unity, только для опытов).
+ * Mesa читает env при создании экрана nouveau (eglInitialize в libunity),
+ * поэтому вызов -- до запуска движка. */
+extern const char *disk_cache_switch_build_id(void) __attribute__((weak));
+
+void nx_shader_cache_setup(int mode) {
+  if (mode <= 0) {
+    setenv("MESA_SHADER_CACHE_DISABLE", "1", 1);
+  } else {
+    setenv("MESA_SHADER_CACHE_DIR", game_root(), 1);
+    setenv("MESA_GLSL_CACHE_MAX_SIZE", "256M", 1);
+    if (mode >= 2) setenv("MESA_SHADER_CACHE_GLSL", "1", 1);
+  }
+  debugPrintf("[shader-cache] gl_program_cache=%d: %s; mesa=%s\n", mode,
+              mode <= 0 ? "выключен" :
+              mode == 1 ? "бинарники Unity (UnityShaderCache) + код nvc0 (mesa_shader_cache)" :
+                          "бинарники Unity + код nvc0 + GLSL-кэш Mesa",
+              disk_cache_switch_build_id ? disk_cache_switch_build_id()
+                                         : "без дискового кэша (старая сборка)");
+}
+
+static void nx_shader_cache_report(unsigned long swap) {
+  if (swap == 1) {
+    GLint formats = -1;
+    glGetIntegerv(0x87FE /* GL_NUM_PROGRAM_BINARY_FORMATS */, &formats);
+    const GLubyte *ren = glGetString(GL_RENDERER), *ver = glGetString(GL_VERSION);
+    debugPrintf("[shader-cache] GL_NUM_PROGRAM_BINARY_FORMATS=%d (%s); renderer=%s; version=%s\n",
+                (int)formats,
+                formats > 0 ? "Unity может кэшировать программы"
+                            : "кэша программ нет: Unity собирает шейдеры заново при каждом запуске",
+                ren ? (const char *)ren : "?", ver ? (const char *)ver : "?");
+  }
+  if (config.engine_profiler && (swap == 600 || swap == 3600)) {
+    char dir[320];
+    snprintf(dir, sizeof dir, "%s/UnityShaderCache", game_root());
+    DIR *dp = opendir(dir);
+    const int exists = dp != NULL;
+    int n = 0;
+    long long bytes = 0;
+    if (dp) {
+      struct dirent *e;
+      while ((e = readdir(dp)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char p[600];
+        struct stat st;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        n++;
+        if (stat(p, &st) == 0) bytes += st.st_size;
+      }
+      closedir(dp);
+    }
+    debugPrintf("[shader-cache] кадр %lu: %s %s, файлов %d, %lld КБ\n",
+                swap, dir, exists ? "есть" : "НЕТ", n, bytes >> 10);
+  }
+}
+
 static EGLBoolean egl_SwapBuffers_log(EGLDisplay d, EGLSurface s) {
+  nxb_memory_trim_render();
   g_swap_count++;
+  nx_shader_cache_report(g_swap_count);
   int trace = (g_swap_count <= 3 || (g_swap_count % 600) == 0);  /* first few frames are the fragile ones */
   if (trace) {
     EGLint w = -1, h = -1;
@@ -631,7 +768,11 @@ static EGLBoolean egl_SwapBuffers_log(EGLDisplay d, EGLSurface s) {
   const unsigned long draws = g_draw_calls;
   g_draw_calls = 0;
   g_swap_enter_tick = armGetSystemTick();
-  EGLBoolean r = eglSwapBuffers(d, s);
+  int fg_handled=0;
+  nx_warp_before_swap(d, s);   /* снимок итога для перепроецирования */
+  EGLBoolean r=nx_fg_present(d,s,&fg_handled);
+  if(!fg_handled)r=eglSwapBuffers(d,s);
+  nx_warp_after_swap();
   const u64 present_end = armGetSystemTick();
   if (r) nx_perf_present(g_swap_enter_tick, present_end, draws);
   g_swap_enter_tick = 0;
@@ -661,7 +802,9 @@ Result __real_nwindowDequeueBuffer(NWindow *nw, s32 *out_slot, NvMultiFence *out
 Result __wrap_nwindowDequeueBuffer(NWindow *nw, s32 *out_slot, NvMultiFence *out_fence) {
   static int n = 0; int lg = bufq_should_log(&n);
   if (lg) debugPrintf("[bufq] dequeue enter (swap#%lu)\n", g_swap_count);
+  const uint64_t t0 = armGetSystemTick();
   Result r = __real_nwindowDequeueBuffer(nw, out_slot, out_fence);
+  nx_frame_add_dequeue(armGetSystemTick() - t0);
   if (lg) debugPrintf("[bufq] dequeue -> rc=0x%x slot=%d\n", r, out_slot ? (int)*out_slot : -1);
   return r;
 }
@@ -697,6 +840,7 @@ Result __wrap_nwindowQueueBuffer(NWindow *nw, s32 slot, const NvMultiFence *fenc
         debugPrintf("[bufq]   fence[%u] id=0x%x value=0x%x\n",
                     i, fence->fences[i].id, fence->fences[i].value);
   }
+  nx_frame_present(nw);   /* интервал показа (swap_interval) */
   Result r = __real_nwindowQueueBuffer(nw, slot, fence);
   if (R_FAILED(r)) {
     /* The consumer REJECTING a present (observed: rc=0x95d = Binder BAD_VALUE
@@ -782,15 +926,15 @@ DynLibFunction dynlib_functions[] = {
   { "openlog", (uintptr_t)&ret0_i },
   { "closelog", (uintptr_t)&ret0_i },
   { "syslog", (uintptr_t)&ret0_i },
-  { "abort", (uintptr_t)&abort },
+  { "abort", (uintptr_t)&abort_fake },
   { "_exit", (uintptr_t)&_exit_fake },
 
   // --- memory ---
-  { "malloc", (uintptr_t)&malloc },
-  { "calloc", (uintptr_t)&calloc },
-  { "realloc", (uintptr_t)&realloc },
+  { "malloc", (uintptr_t)&nx_malloc_diag },
+  { "calloc", (uintptr_t)&nx_calloc_diag },
+  { "realloc", (uintptr_t)&nx_realloc_diag },
   { "free", (uintptr_t)&free },
-  { "memalign", (uintptr_t)&memalign },
+  { "memalign", (uintptr_t)&nx_memalign_diag },
   { "posix_memalign", (uintptr_t)&posix_memalign_fake },
   { "mmap", (uintptr_t)&mmap_fake },
   { "munmap", (uintptr_t)&munmap_fake },
@@ -860,7 +1004,7 @@ DynLibFunction dynlib_functions[] = {
   { "gmtime", (uintptr_t)&gmtime }, { "gmtime_r", (uintptr_t)&gmtime_r },
   { "localtime", (uintptr_t)&localtime }, { "localtime_r", (uintptr_t)&localtime_r },
   { "mktime", (uintptr_t)&mktime }, { "time", (uintptr_t)&time },
-  { "nanosleep", (uintptr_t)&nanosleep }, { "usleep", (uintptr_t)&usleep },
+  { "nanosleep", (uintptr_t)&nx_frame_nanosleep }, { "usleep", (uintptr_t)&nx_frame_usleep },
   { "tzset", (uintptr_t)&tzset }, { "tzname", (uintptr_t)&g_tzname_fake },
   { "getenv", (uintptr_t)&getenv_fake }, { "putenv", (uintptr_t)&putenv },
 
@@ -1002,7 +1146,7 @@ DynLibFunction dynlib_functions[] = {
   { "glBufferData", (uintptr_t)&glBufferData }, { "glClear", (uintptr_t)&glClear },
   { "glClearColor", (uintptr_t)&glClearColor }, { "glClearDepthf", (uintptr_t)&glClearDepthf },
   { "glClearStencil", (uintptr_t)&glClearStencil }, { "glColorMask", (uintptr_t)&glColorMask },
-  { "glCompileShader", (uintptr_t)&glCompileShader }, { "glCompressedTexImage2D", (uintptr_t)&glCompressedTexImage2D },
+  { "glCompileShader", (uintptr_t)&nx_compile_shader }, { "glCompressedTexImage2D", (uintptr_t)&glCompressedTexImage2D },
   { "glCreateProgram", (uintptr_t)&glCreateProgram }, { "glCreateShader", (uintptr_t)&glCreateShader },
   { "glCullFace", (uintptr_t)&glCullFace }, { "glDeleteBuffers", (uintptr_t)&glDeleteBuffers },
   { "glDeleteFramebuffers", (uintptr_t)&glDeleteFramebuffers }, { "glDeleteProgram", (uintptr_t)&glDeleteProgram },
@@ -1061,7 +1205,9 @@ DynLibFunction dynlib_functions[] = {
   // --- мост для C#-слоя ULTRAKILL: [DllImport("nxbridge")] (nx_bridge.c) ---
   { "nxb_gc_bridge_init", (uintptr_t)&nxb_gc_bridge_init },
   { "nxb_exception_trace", (uintptr_t)&nxb_exception_trace },
+  { "nxb_raise_trace", (uintptr_t)&nxb_raise_trace },
   { "nxb_nullcheck_site", (uintptr_t)&nxb_nullcheck_site },
+  { "nxb_bounds_site", (uintptr_t)&nxb_bounds_site },
   { "nxb_gc_begin", (uintptr_t)&nxb_gc_begin },
   { "nxb_gc_pause", (uintptr_t)&nxb_gc_pause },
   { "nxb_gc_resume", (uintptr_t)&nxb_gc_resume },
@@ -1075,7 +1221,18 @@ DynLibFunction dynlib_functions[] = {
   { "nxb_config_int", (uintptr_t)&nxb_config_int },
   { "nxb_config_float", (uintptr_t)&nxb_config_float },
   { "nxb_loading", (uintptr_t)&nxb_loading },
+  { "nxb_memory_trim", (uintptr_t)&nxb_memory_trim },
+  { "nxb_fps_request", (uintptr_t)&nxb_fps_request },
+  { "nxb_render_faults", (uintptr_t)&nxb_render_faults },
   { "nxb_fsr_applied", (uintptr_t)&nxb_fsr_applied },
+  { "nxb_fg_probe_create", (uintptr_t)&nxb_fg_probe_create },
+  { "nxb_fg_probe_callback", (uintptr_t)&nxb_fg_probe_callback },
+  { "nxb_fg_probe_status", (uintptr_t)&nxb_fg_probe_status },
+  { "nxb_fg_create", (uintptr_t)&nxb_fg_create },
+  { "nxb_fg_enqueue", (uintptr_t)&nxb_fg_enqueue },
+  { "nxb_fg_callback", (uintptr_t)&nxb_fg_callback },
+  { "nxb_fg_status", (uintptr_t)&nxb_fg_status },
+  { "nxb_fg_available", (uintptr_t)&nxb_fg_available },
   { "nxb_log", (uintptr_t)&nxb_log },
   { "nxb_video_open", (uintptr_t)&nxb_video_open },
   { "nxb_video_close", (uintptr_t)&nxb_video_close },
@@ -1130,9 +1287,7 @@ size_t dynlib_numfunctions = sizeof(dynlib_functions) / sizeof(*dynlib_functions
 // ---- extra libc/locale imports -------------------------------------------
 // Inherited from the base, where these were added for libFirebaseCpp*. They are
 // plain newlib/locale shims with nothing Firebase-specific about them, and they
-// stay because they cost nothing and widen the resolver. Papers, Please needs no
-// extra imports at all: all 406 of its undefined symbols across libmain +
-// libunity + libil2cpp are already covered by the two main tables.
+// stay because they cost nothing and widen the resolver.
 // ctype/wctype are macros in newlib, so wrap them to take addresses. inotify
 // isn't supported on Switch -> report unavailable (Firebase falls back to
 // polling / skips file watching).
@@ -1151,12 +1306,9 @@ static size_t fbx_wcsxfrm(wchar_t*a,const wchar_t*b,size_t n){return wcsxfrm(a,b
 static int    fbx_inotify_init(void){errno=ENOSYS;return -1;}
 static int    fbx_inotify_add_watch(int fd,const char*p,uint32_t m){(void)fd;(void)p;(void)m;errno=ENOSYS;return -1;}
 static mode_t fbx_umask_chk(mode_t m){(void)m;return 0;} // no umask on Switch
-/* C# System.Environment reaches for `environ`. The Zookeeper base never needed
- * it (its game did not touch that API); Papers, Please's libil2cpp imports it,
- * and the first hardware run reported it as the ONE unresolved symbol:
- *     libil2cpp.so: unresolved import: environ
- * An unresolved import resolves to 0, so any read is a null deref waiting to
- * happen. newlib provides the real thing. */
+/* C# System.Environment reaches for `environ`, which libil2cpp imports. An
+ * unresolved import resolves to 0, so any read would be a null deref; hand it
+ * an empty environment instead. */
 static char *fbx_environ_empty[1] = { NULL };
 char **fbx_environ = fbx_environ_empty;
 
@@ -1185,10 +1337,12 @@ void update_imports(void) { /* no runtime hook swaps needed */ }
  * both import resolution and dlsym(). */
 static DynLibFunction *g_combined = NULL;
 static int g_combined_n = 0;
+extern DynLibFunction nx_android_compat_functions[];
+extern int nx_android_compat_numfunctions;
 static void build_combined(void) {
   if (g_combined) return;
   g_combined_n = (int)dynlib_numfunctions + unity_dynlib_numfunctions
-               + (int)firebase_extra_numfunctions;
+               + (int)firebase_extra_numfunctions + nx_android_compat_numfunctions;
   g_combined = malloc((size_t)g_combined_n * sizeof(DynLibFunction));
   size_t off = 0;
   memcpy(g_combined + off, dynlib_functions, dynlib_numfunctions * sizeof(DynLibFunction));
@@ -1198,11 +1352,20 @@ static void build_combined(void) {
   off += unity_dynlib_numfunctions;
   memcpy(g_combined + off, firebase_extra_functions,
          firebase_extra_numfunctions * sizeof(DynLibFunction));
+  off += firebase_extra_numfunctions;
+  memcpy(g_combined + off, nx_android_compat_functions,
+         (size_t)nx_android_compat_numfunctions * sizeof(DynLibFunction));
 }
 
 /* Search the shim table by name -- used by dlsym() for the GLES/EGL/libc
  * entry points the engine resolves dynamically (not module exports). */
 uintptr_t dynlib_find_export(const char *name) {
+  extern void nxb_scope_record(unsigned,unsigned long long);
+  if(name && !strcmp(name,"nxb_scope_record"))return (uintptr_t)&nxb_scope_record;
+  extern int nxb_aim_should_run(void *, void *);   /* NX_AIM_THROTTLE в libil2cpp */
+  if(name && !strcmp(name,"nxb_aim_should_run"))return (uintptr_t)&nxb_aim_should_run;
+  extern int nxb_sky_should_render(void *);         /* NX_SKY_THROTTLE в libil2cpp */
+  if(name && !strcmp(name,"nxb_sky_should_render"))return (uintptr_t)&nxb_sky_should_render;
   if (!name) return 0;
   build_combined();
   for (int i = 0; i < g_combined_n; i++)
@@ -1213,7 +1376,7 @@ uintptr_t dynlib_find_export(const char *name) {
 
 void crx_resolve_imports(so_module *mod) {
   so_relocate(mod);
-  /* Resolve against the cr3 base table plus the Unity supplementary table.
+  /* Resolve against the base table plus the Unity supplementary table.
    * so_resolve poisons anything missing, so we must search both in a single
    * pass -- build a combined table once. */
   build_combined();

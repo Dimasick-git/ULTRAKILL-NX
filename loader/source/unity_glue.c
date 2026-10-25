@@ -1,7 +1,7 @@
 /* unity_glue.c -- ties the port modules together: the fake "environment"
  * objects the engine is driven with, and a single init entry point.
  *
- * The fake JNIEnv (`fake_env`) is cr3_nx's -- jni_fake.c builds the JNIEnv
+ * The fake JNIEnv (`fake_env`) comes from the base loader -- jni_fake.c builds the JNIEnv
  * function table and exposes it. The three jobjects below are opaque handles the
  * engine receives as `thiz` / Context / Surface arguments; it never inspects
  * their innards (ANativeWindow_fromSurface ignores the Surface and returns our

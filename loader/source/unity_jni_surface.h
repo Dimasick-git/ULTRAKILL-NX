@@ -1,4 +1,4 @@
-/* unity_jni_surface.h -- PAPERS, PLEASE (Unity 2022.3.62f2 / IL2CPP)
+/* unity_jni_surface.h -- Java classes for Unity 2022.3 / IL2CPP
  *
  * The Java classes libunity.so resolves via FindClass at runtime, enumerated
  * from the binary. Feed these into jni_fake.c's class pool. Each entry is

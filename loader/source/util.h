@@ -15,7 +15,7 @@ int debugPrintf(char *text, ...);
 
 void cpu_boost(int on);
 
-// libff4.so reads its stack-protector canary from tpidr_el0 + 0x28.
+// Bionic code reads its stack-protector canary from tpidr_el0 + 0x28.
 
 int ret0(void);
 int retm1(void);

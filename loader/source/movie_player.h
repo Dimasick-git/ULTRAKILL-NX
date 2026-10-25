@@ -1,7 +1,6 @@
-/* movie_player.h -- native FMV playback for local.mediav.MoviePlayer
- *
- * Chaos Rings 3 streams its FMVs out of CRDBmov.android.mvgl through a Java
- * MoviePlayer; we decode them natively instead (see movie_player.c).
+/* movie_player.h -- FMV interface of the base loader (cr3_nx), referenced by
+ * jni_fake.c's unused MoviePlayer handler. The bodies are no-ops in
+ * cr3_stubs.c; ULTRAKILL's videos go through nx_video.c.
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.

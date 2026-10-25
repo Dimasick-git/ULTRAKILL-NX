@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.EventSystems;
 
 namespace NxPort
@@ -12,6 +14,26 @@ namespace NxPort
         bool held;
         Vector2 start;
         BaseRaycaster pressedRaycaster;
+        Component pressedTerminal;
+        static readonly System.Type TerminalType = typeof(ShopButton).Assembly.GetType("ControllerPointer");
+        static readonly PropertyInfo TerminalPressed = TerminalType?.GetProperty("OnPressed", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+        public static UnityEvent TerminalPressEvent(object terminal) =>
+            terminal != null && TerminalType != null && TerminalType.IsInstanceOfType(terminal)
+                ? TerminalPressed?.GetValue(terminal) as UnityEvent : null;
+
+        static Component Terminal(GameObject target)
+        {
+            var terminal = target && TerminalType != null ? target.GetComponentInParent(TerminalType) as Behaviour : null;
+            return terminal && terminal.isActiveAndEnabled ? terminal : null;
+        }
+
+        static GameObject ClickTarget(GameObject target)
+        {
+            var click = ExecuteEvents.GetEventHandler<IPointerClickHandler>(target);
+            var terminal = Terminal(target);
+            return click ? click : terminal ? terminal.gameObject : null;
+        }
 
         public override bool IsModuleSupported() => false;
         public override bool ShouldActivateModule() => false;
@@ -71,12 +93,13 @@ namespace NxPort
             if (down && !held)
             {
                 held = true; start = screen; pressedRaycaster = hit.module;
+                pressedTerminal = Terminal(hit.gameObject);
                 pointer.eligibleForClick = true; pointer.dragging = false; pointer.useDragThreshold = true;
                 pointer.pressPosition = position; pointer.pointerPressRaycast = hit;
                 pointer.clickTime = Time.unscaledTime; pointer.clickCount = 1;
                 if (!NxSoftKeyboard.ContainsTarget(hit.gameObject)) DeselectIfSelectionChanged(hit.gameObject, pointer);
                 pointer.pointerPress = ExecuteEvents.ExecuteHierarchy(hit.gameObject, pointer, ExecuteEvents.pointerDownHandler)
-                    ?? ExecuteEvents.GetEventHandler<IPointerClickHandler>(hit.gameObject);
+                    ?? ClickTarget(hit.gameObject);
                 pointer.rawPointerPress = hit.gameObject;
                 pointer.pointerDrag = ExecuteEvents.GetEventHandler<IDragHandler>(hit.gameObject);
                 if (pointer.pointerDrag) ExecuteEvents.Execute(pointer.pointerDrag, pointer, ExecuteEvents.initializePotentialDrag);
@@ -105,14 +128,22 @@ namespace NxPort
             if (pointer == null) return;
             ExecuteEvents.Execute(pointer.pointerPress, pointer, ExecuteEvents.pointerUpHandler);
             var target = pointer.pointerCurrentRaycast.gameObject;
-            if (click && pointer.eligibleForClick && pointer.pointerPress == ExecuteEvents.GetEventHandler<IPointerClickHandler>(target))
+            if (click && pointer.eligibleForClick && pointer.pointerPress && pointer.pointerPress == ClickTarget(target))
+            {
+                var terminalEvent = pressedTerminal && pressedTerminal == Terminal(target)
+                    ? TerminalPressEvent(pressedTerminal) : null;
                 ExecuteEvents.Execute(pointer.pointerPress, pointer, ExecuteEvents.pointerClickHandler);
+                // ShopButton subscribes to this event, not IPointerClickHandler.
+                // Match ControllerPointer's native click + OnPressed dispatch.
+                terminalEvent?.Invoke();
+            }
             else if (click && pointer.dragging) ExecuteEvents.ExecuteHierarchy(target, pointer, ExecuteEvents.dropHandler);
             if (pointer.dragging) ExecuteEvents.Execute(pointer.pointerDrag, pointer, ExecuteEvents.endDragHandler);
             pointer.eligibleForClick = false; pointer.dragging = false; pointer.pointerPress = null;
             pointer.rawPointerPress = null; pointer.pointerDrag = null;
             HandlePointerExitAndEnter(pointer, null);
             pressedRaycaster = null; held = false;
+            pressedTerminal = null;
         }
 
         public void Cancel() { Release(false); }

@@ -4,3 +4,11 @@
 
 # Upstream AMD headers remain byte-identical, including their whitespace.
 unity/Assets/NxPort/Fsr/Vendor/*.h -text -whitespace
+experimental/framegen/vendor/** -text -whitespace
+unity/Packages/fidelityfx.fsr/** -text -whitespace
+loader/source/vendor/** -text -whitespace
+# Unity's serialized files use empty YAML values with a space after the colon.
+*.meta whitespace=-blank-at-eol
+*.asset whitespace=-blank-at-eol
+# Unified diffs require a leading context space, including on blank lines.
+*.patch -whitespace

@@ -13,7 +13,7 @@
 #include "nx_gameroot.h"
 #include "util.h"
 
-#define NXO_MAX 96
+#define NXO_MAX 160   /* в offsets.ini около 90 записей */
 
 static struct { char key[64]; uint32_t v[3]; int n; } g_tab[NXO_MAX];
 static int g_n = 0;

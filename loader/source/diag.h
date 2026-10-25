@@ -59,6 +59,7 @@ void diag_watchdog_start(void);
 void diag_request_dump(void);   /* снимок стеков в журнал при следующем опросе сторожа */
 uint32_t diag_find_thread_handle(uintptr_t thread);
 uint32_t diag_find_tid_handle(int tid);
+uint32_t diag_find_name_handle(const char *name);   /* профайлер: поток по имени */
 
 #ifdef __cplusplus
 }

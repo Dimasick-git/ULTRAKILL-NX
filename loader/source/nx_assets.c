@@ -1,10 +1,8 @@
-/* pp_assets.c -- reassemble Unity "Split Application Binary" asset files.
+/* nx_assets.c -- reassemble Unity "Split Application Binary" asset files.
  *
  * WHY THIS EXISTS
- *   Papers, Please does not ship the usual single `data.unity3d` bundle. It uses
- *   the classic non-bundled Unity layout, AND it was built with Unity's "Split
- *   Application Binary" option, so the two large serialized files arrive as
- *   1 MB chunks:
+ *   A Unity Android build made with the "Split Application Binary" option ships
+ *   its large serialized files as 1 MB chunks, e.g.:
  *
  *       assets/bin/Data/globalgamemanagers.assets.split0 .. .split5   (6 parts)
  *       assets/bin/Data/sharedassets0.assets.split0      .. .split3   (4 parts)
@@ -29,14 +27,11 @@
  *   self-verifying: concatenate in order, compare the result against the
  *   declared size, and refuse to publish a file that does not match.
  *
- *   Verified against the shipped assets:
- *       globalgamemanagers.assets  6 parts -> 6291048 bytes, header says 6291048
- *       sharedassets0.assets       4 parts -> 3341408 bytes, header says 3341408
- *
  * COST
- *   ~9.6 MB of extra SD space and a few seconds on the very first launch only.
- *   The splits are left in place: they are small, and deleting a user's game
- *   files to save 9 MB is not a trade this code gets to make on their behalf.
+ *   The current ULTRAKILL export is not split, so normally there is nothing to
+ *   join and this costs one stat() per target. When splits are present, the
+ *   join runs once on first launch and the parts are left in place: deleting a
+ *   user's game files is not a trade this code gets to make on their behalf.
  *
  * MIT, same as the rest of the tree.
  */

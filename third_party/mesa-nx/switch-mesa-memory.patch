@@ -1,0 +1,193 @@
+diff --git a/src/gallium/drivers/nouveau/nouveau_buffer.c b/src/gallium/drivers/nouveau/nouveau_buffer.c
+index 42f68fa..8d28c09 100644
+--- a/src/gallium/drivers/nouveau/nouveau_buffer.c
++++ b/src/gallium/drivers/nouveau/nouveau_buffer.c
+@@ -435,6 +435,11 @@ nouveau_buffer_transfer_map(struct pipe_context *pipe,
+       return buf->data ? (buf->data + box->x) : tx->map;
+    } else
+    if (unlikely(buf->domain == 0)) {
++      if (!buf->data) {
++         *ptransfer = NULL;
++         FREE(tx);
++         return NULL;
++      }
+       return buf->data + box->x;
+    }
+ 
+@@ -442,7 +447,11 @@ nouveau_buffer_transfer_map(struct pipe_context *pipe,
+ 
+    if (nouveau_buffer_should_discard(buf, usage)) {
+       int ref = buf->base.reference.count - 1;
+-      nouveau_buffer_reallocate(nv->screen, buf, buf->domain);
++      if (!nouveau_buffer_reallocate(nv->screen, buf, buf->domain)) {
++         *ptransfer = NULL;
++         FREE(tx);
++         return NULL;
++      }
+       if (ref > 0) /* any references inside context possible ? */
+          nv->invalidate_resource_storage(nv, &buf->base, ref);
+    }
+@@ -862,7 +871,8 @@ nouveau_buffer_invalidate(struct pipe_context *pipe,
+    if (buf->mm && !nouveau_buffer_busy(buf, PIPE_TRANSFER_WRITE)) {
+       util_range_set_empty(&buf->valid_buffer_range);
+    } else {
+-      nouveau_buffer_reallocate(nv->screen, buf, buf->domain);
++      if (!nouveau_buffer_reallocate(nv->screen, buf, buf->domain))
++         return;
+       if (ref > 0) /* any references inside context possible ? */
+          nv->invalidate_resource_storage(nv, &buf->base, ref);
+    }
+diff --git a/src/gallium/drivers/nouveau/nouveau_mm.c b/src/gallium/drivers/nouveau/nouveau_mm.c
+index 3ba6ea9..2a9da0f 100644
+--- a/src/gallium/drivers/nouveau/nouveau_mm.c
++++ b/src/gallium/drivers/nouveau/nouveau_mm.c
+@@ -137,6 +137,9 @@ mm_slab_new(struct nouveau_mman *cache, int chunk_order)
+ 
+    ret = nouveau_bo_new(cache->dev, cache->domain, 0, size, &cache->config,
+                         &slab->bo);
++   if (ret && nouveau_mm_trim(cache))
++      ret = nouveau_bo_new(cache->dev, cache->domain, 0, size, &cache->config,
++                           &slab->bo);
+    if (ret) {
+       FREE(slab);
+       return PIPE_ERROR_OUT_OF_MEMORY;
+@@ -173,6 +176,8 @@ nouveau_mm_allocate(struct nouveau_mman *cache,
+    if (!bucket) {
+       ret = nouveau_bo_new(cache->dev, cache->domain, 0, size, &cache->config,
+                            bo);
++      if (ret && nouveau_mm_trim(cache))
++         ret = nouveau_bo_new(cache->dev, cache->domain, 0, size, &cache->config, bo);
+       if (ret)
+          debug_printf("bo_new(%x, %x): %i\n",
+                       size, cache->config.nv50.memtype, ret);
+@@ -185,7 +190,8 @@ nouveau_mm_allocate(struct nouveau_mman *cache,
+       slab = LIST_ENTRY(struct mm_slab, bucket->used.next, head);
+    } else {
+       if (list_is_empty(&bucket->free)) {
+-         mm_slab_new(cache, MAX2(mm_get_order(size), MM_MIN_ORDER));
++         if (mm_slab_new(cache, MAX2(mm_get_order(size), MM_MIN_ORDER)) != PIPE_OK)
++            return NULL;
+       }
+       slab = LIST_ENTRY(struct mm_slab, bucket->free.next, head);
+ 
+@@ -196,8 +202,14 @@ nouveau_mm_allocate(struct nouveau_mman *cache,
+    *offset = mm_slab_alloc(slab) << slab->order;
+ 
+    alloc = MALLOC_STRUCT(nouveau_mm_allocation);
+-   if (!alloc)
++   if (!alloc) {
++      mm_slab_free(slab, *offset >> slab->order);
++      if (slab->free == slab->count) {
++         list_del(&slab->head);
++         list_addtail(&slab->head, &bucket->free);
++      }
+       return NULL;
++   }
+ 
+    nouveau_bo_ref(slab->bo, bo);
+ 
+@@ -275,6 +287,28 @@ nouveau_mm_free_slabs(struct list_head *head)
+    }
+ }
+ 
++/* Call on the render thread after finishing outstanding GPU work.
++ * Only wholly unused slabs are evicted; live resources retain their backing. */
++uint64_t
++nouveau_mm_trim(struct nouveau_mman *cache)
++{
++   uint64_t released = 0;
++   struct mm_slab *slab, *next;
++   int i;
++   if (!cache) return 0;
++   for (i = 0; i < MM_NUM_BUCKETS; ++i) {
++      LIST_FOR_EACH_ENTRY_SAFE(slab, next, &cache->bucket[i].free, head) {
++         assert(slab->free == slab->count);
++         released += slab->bo->size;
++         cache->allocated -= slab->bo->size;
++         list_del(&slab->head);
++         nouveau_bo_ref(NULL, &slab->bo);
++         FREE(slab);
++      }
++   }
++   return released;
++}
++
+ void
+ nouveau_mm_destroy(struct nouveau_mman *cache)
+ {
+diff --git a/src/gallium/drivers/nouveau/nouveau_mm.h b/src/gallium/drivers/nouveau/nouveau_mm.h
+index 8e4f1e5..b278aa6 100644
+--- a/src/gallium/drivers/nouveau/nouveau_mm.h
++++ b/src/gallium/drivers/nouveau/nouveau_mm.h
+@@ -17,6 +17,9 @@ extern struct nouveau_mman *
+ nouveau_mm_create(struct nouveau_device *, uint32_t domain,
+                   union nouveau_bo_config *);
+ 
++extern uint64_t
++nouveau_mm_trim(struct nouveau_mman *);
++
+ extern void
+ nouveau_mm_destroy(struct nouveau_mman *);
+ 
+diff --git a/src/gallium/winsys/nouveau/switch/nouveau_switch_public.h b/src/gallium/winsys/nouveau/switch/nouveau_switch_public.h
+index 33b3588..b357044 100644
+--- a/src/gallium/winsys/nouveau/switch/nouveau_switch_public.h
++++ b/src/gallium/winsys/nouveau/switch/nouveau_switch_public.h
+@@ -11,3 +11,6 @@ int nouveau_switch_resource_get_syncpoint(struct pipe_resource *resource, unsign
+ int nouveau_switch_resource_get_buffer(struct pipe_resource *resource, NvGraphicBuffer *buffer);
+ 
+ #endif
++
++#include <stdint.h>
++uint64_t nouveau_nx_trim_memory(void);
+diff --git a/src/gallium/winsys/nouveau/switch/nouveau_switch_winsys.c b/src/gallium/winsys/nouveau/switch/nouveau_switch_winsys.c
+index 87b9eff..9d2ec73 100644
+--- a/src/gallium/winsys/nouveau/switch/nouveau_switch_winsys.c
++++ b/src/gallium/winsys/nouveau/switch/nouveau_switch_winsys.c
+@@ -16,10 +16,14 @@
+ #include "nouveau/nouveau_winsys.h"
+ #include "nouveau/nouveau_screen.h"
+ #include "nouveau/nouveau_buffer.h"
++#include "nouveau/nouveau_mm.h"
++#include "nouveau/nouveau_fence.h"
+ 
+ #include <nvif/class.h>
+ #include <nvif/cl0080.h>
+ 
++static struct nouveau_screen *nx_trim_screen;
++
+ static mtx_t nouveau_screen_mutex = _MTX_INITIALIZER_NP;
+ 
+ bool nouveau_drm_screen_unref(struct nouveau_screen *screen)
+@@ -30,6 +34,7 @@ bool nouveau_drm_screen_unref(struct nouveau_screen *screen)
+ 
+ 	mtx_lock(&nouveau_screen_mutex);
+ 	ret = --screen->refcount;
++	if (ret == 0 && nx_trim_screen == screen) nx_trim_screen = NULL;
+ 	assert(ret >= 0);
+ 	mtx_unlock(&nouveau_screen_mutex);
+ 	return ret == 0;
+@@ -92,6 +97,7 @@ nouveau_switch_screen_create(void)
+ 		goto err;
+ 
+ 	screen->refcount = 1;
++	nx_trim_screen = screen;
+ 	mtx_unlock(&nouveau_screen_mutex);
+ 	return &screen->base;
+ 
+@@ -204,3 +210,15 @@ nouveau_switch_resource_get_buffer(struct pipe_resource *resource, NvGraphicBuff
+ 
+ 	return 0;
+ }
++
++/* One GLES device in the port. Invoked from its current render thread only. */
++PUBLIC uint64_t nouveau_nx_trim_memory(void)
++{
++    struct nouveau_screen *screen = nx_trim_screen;
++    if (!screen) return 0;
++    nouveau_fence_update(screen, true);
++    uint64_t released = nouveau_mm_trim(screen->mm_GART);
++    if (screen->mm_VRAM != screen->mm_GART)
++        released += nouveau_mm_trim(screen->mm_VRAM);
++    return released;
++}

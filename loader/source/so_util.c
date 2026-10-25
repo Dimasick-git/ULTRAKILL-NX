@@ -6,7 +6,7 @@
  * of the MIT license.  See the LICENSE file for details.
  *
  * Loads Android ARM64 shared objects into a reserved memory range and applies
- * the relocation types used by libff4.so.
+ * the AArch64 relocation types the game's libraries use.
  */
 
 #include <switch.h>

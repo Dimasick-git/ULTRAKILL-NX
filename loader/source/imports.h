@@ -19,7 +19,7 @@ extern size_t dynlib_numfunctions;
 void update_imports(void);
 
 // relocate `mod` and resolve its imports against dynlib_functions[] (and the
-// other already-loaded modules). Used for both libc++_shared.so and libcrx.so.
+// other already-loaded modules). Used for every library the game loads.
 void crx_resolve_imports(so_module *mod);
 
 #endif

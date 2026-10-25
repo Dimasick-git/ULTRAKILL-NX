@@ -1,3 +1,14 @@
+# Текущий FSR 3.1
+
+r37–r41: Settings → SWITCH → Upscaler → FSR 3.1 TEST. Для снижения разрешения
+Render height должен быть ниже 720; выход остаётся 1280×720. Конфигурация:
+`fsr3 1` выбирает temporal backend, `fsr 1` включает фильтр. Ryazha-clk также
+может выключить фильтр; `active bilinear` в логе означает, что FSR не работает.
+
+Это апскейлер, без генерации кадров. Состояние переноса FG:
+[FRAME_GENERATION.md](FRAME_GENERATION.md). GPU-тест upscaler на ПК прошёл;
+замеров качества и времени FSR 3.1 на Switch пока нет.
+
 # FSR1
 
 Реализация использует официальные EASU и RCAS AMD, FP32, два fragment-прохода.

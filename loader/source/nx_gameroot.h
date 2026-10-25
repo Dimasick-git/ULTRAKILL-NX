@@ -1,7 +1,7 @@
 /* nx_gameroot.h -- runtime game-folder resolution.
  *
- * Lets the .nro live in ANY folder under sdmc:/switch (papers_please,
- * PapersPlease, papersplease, whatever) instead of one hardcoded name.
+ * Lets the .nro live in ANY folder under sdmc:/switch (ultrakill, ULTRAKILL,
+ * whatever) instead of one hardcoded name.
  * See nx_gameroot.c for the resolution order.
  *
  * game_root_init() must be the first thing main() calls -- before any

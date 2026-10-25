@@ -1,0 +1,1227 @@
+diff --git a/include/c11/threads.h b/include/c11/threads.h
+index b512521..7122ee5 100644
+--- a/include/c11/threads.h
++++ b/include/c11/threads.h
+@@ -45,9 +45,14 @@
+ // 7.25.6.1
+ #ifndef HAVE_TIMESPEC_GET
+ #include <sys/time.h>
++#include <time.h>
+ 
++/* Newer newlib declares timespec_get() in <time.h> but libc.a has no body for
++ * it; a static function of the same name then clashes with that declaration.
++ * Use our own name for the fallback. */
++#define timespec_get mesa_timespec_get
+ static inline int
+-timespec_get(struct timespec *ts, int base)
++mesa_timespec_get(struct timespec *ts, int base)
+ {
+     if (!ts) return 0;
+     if (base == TIME_UTC) {
+diff --git a/meson.build b/meson.build
+index 0ed24fd..e00b682 100644
+--- a/meson.build
++++ b/meson.build
+@@ -833,7 +833,10 @@ endif
+ with_shader_cache = false
+ _shader_cache = get_option('shader-cache')
+ if _shader_cache != 'false'
+-  if ['windows','horizon'].contains(host_machine.system())
++  # horizon: disk_cache.c has a Switch port (no mmap/flock/getpwuid), see
++  # the __SWITCH__ parts there. Without it ctx->Cache is NULL and
++  # GL_NUM_PROGRAM_BINARY_FORMATS stays 0.
++  if host_machine.system() == 'windows'
+     if _shader_cache == 'true'
+       error('Shader Cache does not currently work on Windows')
+     endif
+diff --git a/src/compiler/glsl/glsl_parser_extras.cpp b/src/compiler/glsl/glsl_parser_extras.cpp
+index c394f00..3bb4120 100644
+--- a/src/compiler/glsl/glsl_parser_extras.cpp
++++ b/src/compiler/glsl/glsl_parser_extras.cpp
+@@ -2119,7 +2119,11 @@ can_skip_compile(struct gl_context *ctx, struct gl_shader *shader,
+                  bool source_has_shader_include)
+ {
+    if (!force_recompile) {
++#ifdef __SWITCH__
++      if (ctx->Cache && disk_cache_stores_glsl(ctx->Cache)) {
++#else
+       if (ctx->Cache) {
++#endif
+          char buf[41];
+          disk_cache_compute_key(ctx->Cache, source, strlen(source),
+                                 shader->sha1);
+@@ -2261,7 +2265,12 @@ _mesa_glsl_compile_shader(struct gl_context *ctx, struct gl_shader *shader,
+    delete state->symbols;
+    ralloc_free(state);
+ 
++#ifdef __SWITCH__
++   if (ctx->Cache && disk_cache_stores_glsl(ctx->Cache) &&
++       shader->CompileStatus == COMPILE_SUCCESS) {
++#else
+    if (ctx->Cache && shader->CompileStatus == COMPILE_SUCCESS) {
++#endif
+       char sha1_buf[41];
+       disk_cache_put_key(ctx->Cache, shader->sha1);
+       if (ctx->_Shader->Flags & GLSL_CACHE_INFO) {
+diff --git a/src/compiler/glsl/shader_cache.cpp b/src/compiler/glsl/shader_cache.cpp
+index aacaa46..ef7b3c1 100644
+--- a/src/compiler/glsl/shader_cache.cpp
++++ b/src/compiler/glsl/shader_cache.cpp
+@@ -88,6 +88,11 @@ shader_cache_write_program_metadata(struct gl_context *ctx,
+    struct disk_cache *cache = ctx->Cache;
+    if (!cache)
+       return;
++#ifdef __SWITCH__
++   /* GL program binaries hold the same data (disk_cache_stores_glsl). */
++   if (!disk_cache_stores_glsl(cache))
++      return;
++#endif
+ 
+    /* Exit early when we are dealing with a ff shader with no source file to
+     * generate a source from, or with a SPIR-V shader.
+@@ -153,6 +158,11 @@ shader_cache_read_program_metadata(struct gl_context *ctx,
+    struct disk_cache *cache = ctx->Cache;
+    if (!cache)
+       return false;
++#ifdef __SWITCH__
++   /* Nothing stored at this level, and a miss is a file open on the SD. */
++   if (!disk_cache_stores_glsl(cache))
++      return false;
++#endif
+ 
+    /* Include bindings when creating sha1. These bindings change the resulting
+     * binary so they are just as important as the shader source.
+diff --git a/src/gallium/auxiliary/os/os_thread.h b/src/gallium/auxiliary/os/os_thread.h
+index 7f5718e..37ba9b4 100644
+--- a/src/gallium/auxiliary/os/os_thread.h
++++ b/src/gallium/auxiliary/os/os_thread.h
+@@ -131,7 +131,7 @@ typedef struct {
+ static inline void
+ pipe_tsd_init(pipe_tsd *tsd)
+ {
+-   if (tss_create(&tsd->key, NULL/*free*/) != 0) {
++   if (tss_create(&tsd->key, NULL/*free*/) != thrd_success) {
+       exit(-1);
+    }
+    tsd->initMagic = PIPE_TSD_INIT_MAGIC;
+@@ -152,7 +152,7 @@ pipe_tsd_set(pipe_tsd *tsd, void *value)
+    if (tsd->initMagic != (int) PIPE_TSD_INIT_MAGIC) {
+       pipe_tsd_init(tsd);
+    }
+-   if (tss_set(tsd->key, value) != 0) {
++   if (tss_set(tsd->key, value) != thrd_success) {
+       exit(-1);
+    }
+ }
+diff --git a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
+index 5dc0e24..dd7fdc8 100644
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
+@@ -216,6 +216,17 @@ nv50_ir_apply_fixups(void *fixupData, uint32_t *code,
+ extern void nv50_ir_get_target_library(uint32_t chipset,
+                                        const uint32_t **code, uint32_t *size);
+ 
++/* Shader cache: relocations are plain data and are stored as is (this many
++ * bytes). Fixups hold callback pointers and are stored as 1 + 2 * count words
++ * with table indices instead; serialize returns false for a callback outside
++ * the table (the program is then not cached). deserialize returns a FREE-able
++ * fixupData, or NULL if the words do not describe one.
++ */
++extern uint32_t nv50_ir_relocs_size(const void *relocData);
++extern uint32_t nv50_ir_fixups_serialized_words(const void *fixupData);
++extern bool nv50_ir_fixups_serialize(const void *fixupData, uint32_t *out);
++extern void *nv50_ir_fixups_deserialize(const uint32_t *in, uint32_t words);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
+index e244bd0..0a6a30a 100644
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
+@@ -4610,4 +4610,6 @@ TargetGM107::createCodeEmitterGM107(Program::Type type)
+    return emit;
+ }
+ 
++const FixupApply gm107FixupApply[2] = { interpApply, selpFlip };
++
+ } // namespace nv50_ir
+diff --git a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
+index c2c2fce..bb7e149 100644
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
+@@ -525,6 +525,66 @@ nv50_ir_apply_fixups(void *fixupData, uint32_t *code,
+       info->entry[i].apply(&info->entry[i], code, data);
+ }
+ 
++uint32_t
++nv50_ir_relocs_size(const void *relocData)
++{
++   const nv50_ir::RelocInfo *info =
++      reinterpret_cast<const nv50_ir::RelocInfo *>(relocData);
++   return sizeof(*info) + info->count * sizeof(info->entry[0]);
++}
++
++uint32_t
++nv50_ir_fixups_serialized_words(const void *fixupData)
++{
++   const nv50_ir::FixupInfo *info =
++      reinterpret_cast<const nv50_ir::FixupInfo *>(fixupData);
++   return 1 + 2 * info->count;
++}
++
++bool
++nv50_ir_fixups_serialize(const void *fixupData, uint32_t *out)
++{
++   const nv50_ir::FixupInfo *info =
++      reinterpret_cast<const nv50_ir::FixupInfo *>(fixupData);
++
++   out[0] = info->count;
++   for (unsigned i = 0; i < info->count; ++i) {
++      const nv50_ir::FixupEntry &e = info->entry[i];
++      unsigned id;
++      for (id = 0; id < ARRAY_SIZE(nv50_ir::gm107FixupApply); ++id)
++         if (e.apply == nv50_ir::gm107FixupApply[id])
++            break;
++      if (id == ARRAY_SIZE(nv50_ir::gm107FixupApply))
++         return false;
++      out[1 + 2 * i] = id;
++      out[2 + 2 * i] = e.val;
++   }
++   return true;
++}
++
++void *
++nv50_ir_fixups_deserialize(const uint32_t *in, uint32_t words)
++{
++   if (words < 1 || words != 1 + 2 * in[0])
++      return NULL;
++   const uint32_t count = in[0];
++   nv50_ir::FixupInfo *info = reinterpret_cast<nv50_ir::FixupInfo *>(
++      MALLOC(sizeof(nv50_ir::FixupInfo) + count * sizeof(nv50_ir::FixupEntry)));
++   if (!info)
++      return NULL;
++   info->count = count;
++   for (unsigned i = 0; i < count; ++i) {
++      const uint32_t id = in[1 + 2 * i];
++      if (id >= ARRAY_SIZE(nv50_ir::gm107FixupApply)) {
++         FREE(info);
++         return NULL;
++      }
++      info->entry[i].apply = nv50_ir::gm107FixupApply[id];
++      info->entry[i].val = in[2 + 2 * i];
++   }
++   return info;
++}
++
+ void
+ nv50_ir_get_target_library(uint32_t chipset,
+                            const uint32_t **code, uint32_t *size)
+diff --git a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
+index afeca14..ceffa11 100644
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
+@@ -91,6 +91,11 @@ struct FixupInfo
+    FixupEntry entry[0];
+ };
+ 
++// Fixup callbacks of the GM107 emitter, for the shader cache: cached fixups
++// keep an index into this table, the functions move with every load of a
++// statically linked binary (nv50_ir_fixups_serialize).
++extern const FixupApply gm107FixupApply[2];
++
+ class CodeEmitter
+ {
+ public:
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_context.h b/src/gallium/drivers/nouveau/nvc0/nvc0_context.h
+index dacb484..9819fb2 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_context.h
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_context.h
+@@ -321,8 +321,13 @@ extern struct draw_stage *nvc0_draw_render_stage(struct nvc0_context *);
+ 
+ /* nvc0_program.c */
+ bool nvc0_program_translate(struct nvc0_program *, uint16_t chipset,
++                            struct disk_cache *,
+                             struct pipe_debug_callback *);
+ bool nvc0_program_upload(struct nvc0_context *, struct nvc0_program *);
++#ifdef __SWITCH__
++/* counts: cache hits, codegen runs stored, not cacheable; ns: hit, codegen */
++void nvc0_code_cache_take_stats(uint32_t counts[3], uint64_t ns[2]);
++#endif
+ void nvc0_program_destroy(struct nvc0_context *, struct nvc0_program *);
+ void nvc0_program_library_upload(struct nvc0_context *);
+ uint32_t nvc0_program_symbol_offset(const struct nvc0_program *,
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
+index 4cbe3cb..2fd3195 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
+@@ -30,6 +30,14 @@
+ #include "codegen/nv50_ir_driver.h"
+ #include "nvc0/nve4_compute.h"
+ 
++#ifdef __SWITCH__
++#include "tgsi/tgsi_parse.h"
++#include "util/blob.h"
++#include "util/disk_cache.h"
++#include "util/os_time.h"
++#include "util/u_atomic.h"
++#endif
++
+ /* NOTE: Using a[0x270] in FP may cause an error even if we're using less than
+  * 124 scalar varying values.
+  */
+@@ -568,13 +576,203 @@ nvc0_program_dump(struct nvc0_program *prog)
+ }
+ #endif
+ 
++#ifdef __SWITCH__
++/* Machine-code cache. nv50_ir turns the TGSI of every new program into GPU
++ * code, 5-30 ms per stage on the Switch CPU, and glProgramBinary pays that
++ * again because a GL program binary holds only TGSI. The result of translate
++ * for the same tokens goes into Mesa's disk cache (needs MESA_SHADER_CACHE_DIR),
++ * keyed by the inputs below plus the driver keys (build id of this Mesa).
++ *
++ * Compute programs (symbol tables) and stream output (the tfb state is built
++ * from the codegen info) are not cached.
++ */
++#define NVC0_CODE_CACHE_VERSION 1
++
++/* Since the last nvc0_code_cache_take_stats(): translations served from the
++ * cache, run through codegen and stored, and not cacheable; time of the first
++ * two. The loader reads them for its log. */
++static struct {
++   uint32_t hits, misses, uncached;
++   uint64_t hit_ns, miss_ns;
++} nvc0_code_cache_stats;
++
++void
++nvc0_code_cache_take_stats(uint32_t counts[3], uint64_t ns[2])
++{
++   counts[0] = p_atomic_xchg(&nvc0_code_cache_stats.hits, 0);
++   counts[1] = p_atomic_xchg(&nvc0_code_cache_stats.misses, 0);
++   counts[2] = p_atomic_xchg(&nvc0_code_cache_stats.uncached, 0);
++   ns[0] = p_atomic_xchg(&nvc0_code_cache_stats.hit_ns, 0);
++   ns[1] = p_atomic_xchg(&nvc0_code_cache_stats.miss_ns, 0);
++}
++
++static bool
++nvc0_code_cache_key(struct disk_cache *cache, const struct nvc0_program *prog,
++                    uint16_t chipset, cache_key key)
++{
++   if (!disk_cache_is_persistent(cache) ||
++       prog->type == PIPE_SHADER_COMPUTE ||
++       prog->pipe.type != PIPE_SHADER_IR_TGSI ||
++       prog->pipe.stream_output.num_outputs)
++      return false;
++
++   struct blob blob;
++   blob_init(&blob);
++   blob_write_uint32(&blob, NVC0_CODE_CACHE_VERSION);
++   blob_write_uint32(&blob, prog->type);
++   blob_write_uint32(&blob, chipset);
++   blob_write_uint32(&blob, prog->vp.num_ucps); /* io.genUserClip */
++   blob_write_bytes(&blob, prog->pipe.tokens,
++                    tgsi_num_tokens(prog->pipe.tokens) *
++                    sizeof(struct tgsi_token));
++   const bool ok = !blob.out_of_memory;
++   if (ok)
++      disk_cache_compute_key(cache, blob.data, blob.size, key);
++   blob_finish(&blob);
++   return ok;
++}
++
++/* Everything nvc0_program_translate() sets on a non-compute program. */
++static void
++nvc0_code_cache_store(struct disk_cache *cache, const cache_key key,
++                      const struct nvc0_program *prog)
++{
++   const uint32_t relocs_size =
++      prog->relocs ? nv50_ir_relocs_size(prog->relocs) : 0;
++   const uint32_t fixup_words =
++      prog->fixups ? nv50_ir_fixups_serialized_words(prog->fixups) : 0;
++   uint32_t *fixups = NULL;
++   if (fixup_words) {
++      fixups = MALLOC(fixup_words * 4);
++      if (!fixups || !nv50_ir_fixups_serialize(prog->fixups, fixups)) {
++         FREE(fixups);
++         return;
++      }
++   }
++
++   struct blob blob;
++   blob_init(&blob);
++   blob_write_uint32(&blob, NVC0_CODE_CACHE_VERSION);
++   blob_write_uint32(&blob, prog->code_size);
++   blob_write_bytes(&blob, prog->code, prog->code_size);
++   blob_write_uint32(&blob, relocs_size);
++   blob_write_bytes(&blob, prog->relocs, relocs_size);
++   blob_write_uint32(&blob, fixup_words);
++   blob_write_bytes(&blob, fixups, fixup_words * 4);
++   blob_write_uint8(&blob, prog->need_tls);
++   blob_write_uint8(&blob, prog->num_gprs);
++   blob_write_uint8(&blob, prog->num_barriers);
++   blob_write_uint32(&blob, prog->parm_size);
++   blob_write_bytes(&blob, prog->hdr, sizeof(prog->hdr));
++   blob_write_bytes(&blob, prog->flags, sizeof(prog->flags));
++   blob_write_bytes(&blob, &prog->vp, sizeof(prog->vp));
++   blob_write_bytes(&blob, &prog->fp, sizeof(prog->fp));
++   blob_write_bytes(&blob, &prog->tp, sizeof(prog->tp));
++   FREE(fixups);
++
++   if (!blob.out_of_memory) {
++      /* The index lets later runs skip the SD lookup for unknown keys. */
++      disk_cache_put_key(cache, key);
++      disk_cache_put(cache, key, blob.data, blob.size, NULL);
++   }
++   blob_finish(&blob);
++}
++
++static bool
++nvc0_code_cache_load(struct disk_cache *cache, const cache_key key,
++                     struct nvc0_program *prog)
++{
++   if (!disk_cache_has_key(cache, key))
++      return false;
++   size_t size = 0;
++   void *data = disk_cache_get(cache, key, &size);
++   if (!data)
++      return false;
++
++   struct nvc0_program p = *prog;
++   struct blob_reader r;
++   blob_reader_init(&r, data, size);
++   bool ok = blob_read_uint32(&r) == NVC0_CODE_CACHE_VERSION;
++
++   p.code_size = blob_read_uint32(&r);
++   const void *code = blob_read_bytes(&r, p.code_size);
++   const uint32_t relocs_size = blob_read_uint32(&r);
++   const void *relocs = blob_read_bytes(&r, relocs_size);
++   const uint32_t fixup_words = blob_read_uint32(&r);
++   const void *fixups = blob_read_bytes(&r, fixup_words * 4);
++   p.need_tls = blob_read_uint8(&r);
++   p.num_gprs = blob_read_uint8(&r);
++   p.num_barriers = blob_read_uint8(&r);
++   p.parm_size = blob_read_uint32(&r);
++   blob_copy_bytes(&r, p.hdr, sizeof(p.hdr));
++   blob_copy_bytes(&r, p.flags, sizeof(p.flags));
++   blob_copy_bytes(&r, &p.vp, sizeof(p.vp));
++   blob_copy_bytes(&r, &p.fp, sizeof(p.fp));
++   blob_copy_bytes(&r, &p.tp, sizeof(p.tp));
++   ok = ok && !r.overrun && r.current == r.end && (p.code_size & 3) == 0;
++
++   p.code = NULL;
++   p.relocs = NULL;
++   p.fixups = NULL;
++   if (ok && p.code_size) {
++      p.code = MALLOC(p.code_size);
++      ok = p.code != NULL;
++      if (ok)
++         memcpy(p.code, code, p.code_size);
++   }
++   if (ok && relocs_size) {
++      p.relocs = MALLOC(relocs_size);
++      ok = p.relocs != NULL;
++      if (ok) {
++         memcpy(p.relocs, relocs, relocs_size);
++         ok = relocs_size == nv50_ir_relocs_size(p.relocs);
++      }
++   }
++   if (ok && fixup_words) {
++      /* blob data is only byte aligned */
++      uint32_t *words = MALLOC(fixup_words * 4);
++      ok = words != NULL;
++      if (ok) {
++         memcpy(words, fixups, fixup_words * 4);
++         p.fixups = nv50_ir_fixups_deserialize(words, fixup_words);
++         ok = p.fixups != NULL;
++      }
++      FREE(words);
++   }
++   free(data);
++
++   if (!ok) {
++      FREE(p.code);
++      FREE(p.relocs);
++      FREE(p.fixups);
++      return false;
++   }
++   *prog = p;
++   return true;
++}
++#endif /* __SWITCH__ */
++
+ bool
+ nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
++                       struct disk_cache *disk_cache,
+                        struct pipe_debug_callback *debug)
+ {
+    struct nv50_ir_prog_info *info;
+    int ret;
+ 
++#ifdef __SWITCH__
++   const int64_t start_ns = os_time_get_nano();
++   cache_key code_key;
++   const bool cacheable =
++      nvc0_code_cache_key(disk_cache, prog, chipset, code_key);
++   if (cacheable && nvc0_code_cache_load(disk_cache, code_key, prog)) {
++      p_atomic_inc(&nvc0_code_cache_stats.hits);
++      p_atomic_add(&nvc0_code_cache_stats.hit_ns,
++                   os_time_get_nano() - start_ns);
++      return true;
++   }
++#endif
++
+    info = CALLOC_STRUCT(nv50_ir_prog_info);
+    if (!info)
+       return false;
+@@ -723,6 +921,17 @@ nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
+       nvc0_program_dump(prog);
+ #endif
+ 
++#ifdef __SWITCH__
++   if (cacheable) {
++      nvc0_code_cache_store(disk_cache, code_key, prog);
++      p_atomic_inc(&nvc0_code_cache_stats.misses);
++      p_atomic_add(&nvc0_code_cache_stats.miss_ns,
++                   os_time_get_nano() - start_ns);
++   } else {
++      p_atomic_inc(&nvc0_code_cache_stats.uncached);
++   }
++#endif
++
+ out:
+ #ifndef __SWITCH__
+    if (info->bin.sourceRep == PIPE_SHADER_IR_NIR)
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_shader_state.c b/src/gallium/drivers/nouveau/nvc0/nvc0_shader_state.c
+index b7e0c8a..9089a10 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_shader_state.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_shader_state.c
+@@ -54,7 +54,8 @@ nvc0_program_validate(struct nvc0_context *nvc0, struct nvc0_program *prog)
+ 
+    if (!prog->translated) {
+       prog->translated = nvc0_program_translate(
+-         prog, nvc0->screen->base.device->chipset, &nvc0->base.debug);
++         prog, nvc0->screen->base.device->chipset,
++         nvc0->screen->base.disk_shader_cache, &nvc0->base.debug);
+       if (!prog->translated)
+          return false;
+    }
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_state.c b/src/gallium/drivers/nouveau/nvc0/nvc0_state.c
+index a2cb6f3..20ddfff 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_state.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_state.c
+@@ -618,6 +618,7 @@ nvc0_sp_state_create(struct pipe_context *pipe,
+ 
+    prog->translated = nvc0_program_translate(
+       prog, nvc0_context(pipe)->screen->base.device->chipset,
++      nvc0_context(pipe)->screen->base.disk_shader_cache,
+       &nouveau_context(pipe)->debug);
+ 
+    return (void *)prog;
+@@ -761,6 +762,7 @@ nvc0_cp_state_create(struct pipe_context *pipe,
+ 
+    prog->translated = nvc0_program_translate(
+       prog, nvc0_context(pipe)->screen->base.device->chipset,
++      nvc0_context(pipe)->screen->base.disk_shader_cache,
+       &nouveau_context(pipe)->debug);
+ 
+    return (void *)prog;
+diff --git a/src/mesa/state_tracker/st_shader_cache.c b/src/mesa/state_tracker/st_shader_cache.c
+index 3382b65..bcd2d31 100644
+--- a/src/mesa/state_tracker/st_shader_cache.c
++++ b/src/mesa/state_tracker/st_shader_cache.c
+@@ -136,6 +136,15 @@ st_store_ir_in_disk_cache(struct st_context *st, struct gl_program *prog,
+ {
+    if (!st->ctx->Cache)
+       return;
++#ifdef __SWITCH__
++   /* The GLSL level of the disk cache is off (disk_cache_stores_glsl): nothing
++    * would store the blob. glGetProgramBinary serializes the TGSI itself
++    * (st_serialise_tgsi_program_binary), the tokens stay in stp->state.tokens
++    * until then.
++    */
++   if (!disk_cache_stores_glsl(st->ctx->Cache))
++      return;
++#endif
+ 
+    /* Exit early when we are dealing with a ff shader with no source file to
+     * generate a source from.
+diff --git a/src/util/disk_cache.c b/src/util/disk_cache.c
+index a92d621..ebdc3e9 100644
+--- a/src/util/disk_cache.c
++++ b/src/util/disk_cache.c
+@@ -23,19 +23,31 @@
+ 
+ #ifdef ENABLE_SHADER_CACHE
+ 
++#ifdef __SWITCH__
++#include "c11/threads.h" /* mtx_t for the in-memory index */
++#endif
+ #include <ctype.h>
+-#include <ftw.h>
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+-#include <sys/file.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+-#include <sys/mman.h>
+ #include <unistd.h>
+ #include <fcntl.h>
+-#include <pwd.h>
+ #include <errno.h>
++#ifndef __SWITCH__
++#include <ftw.h>
++#include <sys/file.h>
++#include <sys/mman.h>
++#include <pwd.h>
++#else
++/* Horizon (newlib + libnx): one process, no users, no mmap of files and no
++ * flock. The index lives in memory and dirty slots are written back to the
++ * index file with plain stdio from the cache thread; the cache directory comes
++ * only from MESA_SHADER_CACHE_DIR / MESA_GLSL_CACHE_DIR. Without either of
++ * them the cache object still exists (ctx->Cache, GL_ARB_get_program_binary),
++ * it just never touches the disk. */
++#endif
+ #include <dirent.h>
+ #include <inttypes.h>
+ #include "zlib.h"
+@@ -52,11 +64,18 @@
+ #include "util/mesa-sha1.h"
+ #include "util/ralloc.h"
+ #include "util/compiler.h"
++#include "util/macros.h"
+ 
+ #include "disk_cache.h"
+ 
+ /* Number of bits to mask off from a cache key to get an index. */
++#ifdef __SWITCH__
++/* 16k slots, 320 KiB in memory instead of 1.3 MiB. A collision only costs a
++ * recompile of the shader whose slot was taken. */
++#define CACHE_INDEX_KEY_BITS 14
++#else
+ #define CACHE_INDEX_KEY_BITS 16
++#endif
+ 
+ /* Mask for computing an index from a key. */
+ #define CACHE_INDEX_KEY_MASK ((1 << CACHE_INDEX_KEY_BITS) - 1)
+@@ -111,8 +130,138 @@ struct disk_cache {
+ 
+    disk_cache_put_cb blob_put_cb;
+    disk_cache_get_cb blob_get_cb;
++
++#ifdef __SWITCH__
++   /* index_mmap is a malloc'ed copy of the index file. Slots changed since
++    * the last write-back are marked in index_dirty (one bit per slot) and
++    * written by switch_index_flush() on the cache thread. */
++   char *index_path;
++   FILE *index_file;
++   mtx_t index_lock;
++   uint32_t index_dirty[CACHE_INDEX_MAX_KEYS / 32];
++
++   /* MESA_SHADER_CACHE_GLSL, see disk_cache_stores_glsl(). */
++   bool glsl_store;
++#endif
+ };
+ 
++#ifdef __SWITCH__
++/* Allocated size of a cache file. fsdev does not fill st_blocks. */
++#define CACHE_FILE_DISK_SIZE(sb) ((uint64_t)(sb).st_size)
++#else
++#define CACHE_FILE_DISK_SIZE(sb) ((uint64_t)(sb).st_blocks * 512)
++#endif
++
++#ifdef __SWITCH__
++const char *
++disk_cache_switch_build_id(void)
++{
++   /* Changes with every build of this file. build-switch.sh touches it before
++    * each ninja run, so any rebuild of the library gets a new id. */
++   return "mesa " PACKAGE_VERSION " switch-shader-cache 1 " __DATE__ " " __TIME__;
++}
++
++static bool
++switch_index_load(struct disk_cache *cache, const char *path, size_t size)
++{
++   cache->index_mmap = calloc(1, size);
++   if (cache->index_mmap == NULL)
++      return false;
++   cache->index_mmap_size = size;
++
++   /* A missing, short or foreign index starts empty; switch_index_flush()
++    * then rewrites the whole file on the first write-back. */
++   FILE *f = fopen(path, "rb");
++   if (f) {
++      struct stat sb;
++      if (fstat(fileno(f), &sb) != 0 || sb.st_size != size ||
++          fread(cache->index_mmap, 1, size, f) != size)
++         memset(cache->index_mmap, 0, size);
++      fclose(f);
++   }
++
++   cache->index_path = strdup(path);
++   if (cache->index_path == NULL) {
++      free(cache->index_mmap);
++      cache->index_mmap = NULL;
++      return false;
++   }
++   mtx_init(&cache->index_lock, mtx_plain);
++   return true;
++}
++
++static void
++switch_index_mark_dirty(struct disk_cache *cache, int slot)
++{
++   mtx_lock(&cache->index_lock);
++   cache->index_dirty[slot / 32] |= 1u << (slot % 32);
++   mtx_unlock(&cache->index_lock);
++}
++
++/* Writes the dirty part of the index back to <cache>/index. Runs on the cache
++ * thread (cache_put) and from disk_cache_destroy. */
++static void
++switch_index_flush(struct disk_cache *cache)
++{
++   uint32_t dirty[CACHE_INDEX_MAX_KEYS / 32];
++   bool any = false;
++
++   mtx_lock(&cache->index_lock);
++   memcpy(dirty, cache->index_dirty, sizeof(dirty));
++   memset(cache->index_dirty, 0, sizeof(cache->index_dirty));
++   for (unsigned w = 0; w < ARRAY_SIZE(dirty) && !any; w++)
++      any = dirty[w] != 0;
++   mtx_unlock(&cache->index_lock);
++
++   if (cache->index_file == NULL) {
++      cache->index_file = fopen(cache->index_path, "r+b");
++      if (cache->index_file) {
++         struct stat sb;
++         if (fstat(fileno(cache->index_file), &sb) != 0 ||
++             sb.st_size != cache->index_mmap_size) {
++            fclose(cache->index_file);
++            cache->index_file = NULL;
++         }
++      }
++      if (cache->index_file == NULL) {
++         /* Create (or replace a bad) index with the whole in-memory copy. */
++         cache->index_file = fopen(cache->index_path, "w+b");
++         if (cache->index_file == NULL)
++            return;
++         if (fwrite(cache->index_mmap, 1, cache->index_mmap_size,
++                    cache->index_file) != cache->index_mmap_size) {
++            fclose(cache->index_file);
++            cache->index_file = NULL;
++            return;
++         }
++         fflush(cache->index_file);
++         return;
++      }
++   }
++
++   FILE *f = cache->index_file;
++   /* The size counter is cheap to write, keep it current every time. */
++   if (fseek(f, 0, SEEK_SET) == 0)
++      fwrite(cache->size, sizeof(*cache->size), 1, f);
++
++   if (any) {
++      for (unsigned w = 0; w < ARRAY_SIZE(dirty); w++) {
++         uint32_t bits = dirty[w];
++         while (bits) {
++            const unsigned b = __builtin_ctz(bits);
++            bits &= bits - 1;
++            const unsigned slot = w * 32 + b;
++            const long off = sizeof(uint64_t) + (long)slot * CACHE_KEY_SIZE;
++            if (fseek(f, off, SEEK_SET) == 0)
++               fwrite(cache->stored_keys + slot * CACHE_KEY_SIZE,
++                      CACHE_KEY_SIZE, 1, f);
++         }
++      }
++   }
++   fflush(f);
++}
++#endif
++
+ struct disk_cache_put_job {
+    struct util_queue_fence fence;
+ 
+@@ -203,16 +352,20 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+    struct disk_cache *cache = NULL;
+    char *path, *max_size_str;
+    uint64_t max_size;
++   size_t size;
++#ifndef __SWITCH__
+    int fd = -1;
+    struct stat sb;
+-   size_t size;
++#endif
+ 
+    uint8_t cache_version = CACHE_VERSION;
+    size_t cv_size = sizeof(cache_version);
+ 
++#ifndef __SWITCH__
+    /* If running as a users other than the real user disable cache */
+    if (geteuid() != getuid())
+       return NULL;
++#endif
+ 
+    /* A ralloc context for transient data during this invocation. */
+    local = ralloc_context(NULL);
+@@ -222,6 +375,11 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+    /* At user request, disable shader cache entirely. */
+    if (env_var_as_boolean("MESA_GLSL_CACHE_DISABLE", false))
+       goto fail;
++#ifdef __SWITCH__
++   /* The later upstream name of the same switch. */
++   if (env_var_as_boolean("MESA_SHADER_CACHE_DISABLE", false))
++      goto fail;
++#endif
+ 
+    cache = rzalloc(NULL, struct disk_cache);
+    if (cache == NULL)
+@@ -230,6 +388,23 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+    /* Assume failure. */
+    cache->path_init_failed = true;
+ 
++#ifdef __SWITCH__
++   /* No $HOME or passwd here: the directory has to be given explicitly.
++    * Without it there is no disk store, but the object (and with it
++    * GL_ARB_get_program_binary) stays.
++    */
++   path = getenv("MESA_SHADER_CACHE_DIR");
++   if (path == NULL)
++      path = getenv("MESA_GLSL_CACHE_DIR");
++   if (path == NULL || path[0] == '\0')
++      goto path_fail;
++   if (mkdir_if_needed(path) == -1)
++      goto path_fail;
++   path = concatenate_and_mkdir(local, path, CACHE_DIR_NAME);
++   if (path == NULL)
++      goto path_fail;
++#else
++
+    /* Determine path for cache based on the first defined name as follows:
+     *
+     *   $MESA_GLSL_CACHE_DIR
+@@ -293,6 +468,7 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+       if (path == NULL)
+          goto path_fail;
+    }
++#endif /* __SWITCH__ */
+ 
+    cache->path = ralloc_strdup(cache, path);
+    if (cache->path == NULL)
+@@ -302,6 +478,11 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+    if (path == NULL)
+       goto path_fail;
+ 
++#ifdef __SWITCH__
++   size = sizeof(*cache->size) + CACHE_INDEX_MAX_KEYS * CACHE_KEY_SIZE;
++   if (!switch_index_load(cache, path, size))
++      goto path_fail;
++#else
+    fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd == -1)
+       goto path_fail;
+@@ -336,6 +517,7 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+    if (cache->index_mmap == MAP_FAILED)
+       goto path_fail;
+    cache->index_mmap_size = size;
++#endif /* __SWITCH__ */
+ 
+    cache->size = (uint64_t *) cache->index_mmap;
+    cache->stored_keys = cache->index_mmap + sizeof(uint64_t);
+@@ -385,17 +567,47 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
+     * The queue will resize automatically when it's full, so adding new jobs
+     * doesn't stall.
+     */
+-   util_queue_init(&cache->cache_queue, "disk$", 32, 4,
++#ifdef __SWITCH__
++   /* One low-priority thread (libnx C11 threads start at 0x3B on all of the
++    * process's cores): the game's own threads matter more than the queue. */
++   const unsigned num_threads = 1;
++#else
++   const unsigned num_threads = 4;
++#endif
++#ifdef __SWITCH__
++   /* Without a thread util_queue_add_job() drops every job, so there would
++    * be a cache directory that never gets written. */
++   if (!util_queue_init(&cache->cache_queue, "disk$", 32, num_threads,
++                        UTIL_QUEUE_INIT_RESIZE_IF_FULL |
++                        UTIL_QUEUE_INIT_USE_MINIMUM_PRIORITY |
++                        UTIL_QUEUE_INIT_SET_FULL_THREAD_AFFINITY)) {
++      mtx_destroy(&cache->index_lock);
++      free(cache->index_path);
++      free(cache->index_mmap);
++      cache->index_path = NULL;
++      cache->index_mmap = NULL;
++      cache->size = NULL;
++      cache->stored_keys = NULL;
++      goto path_fail;
++   }
++#else
++   util_queue_init(&cache->cache_queue, "disk$", 32, num_threads,
+                    UTIL_QUEUE_INIT_RESIZE_IF_FULL |
+                    UTIL_QUEUE_INIT_USE_MINIMUM_PRIORITY |
+                    UTIL_QUEUE_INIT_SET_FULL_THREAD_AFFINITY);
++#endif
+ 
+    cache->path_init_failed = false;
++#ifdef __SWITCH__
++   cache->glsl_store = env_var_as_boolean("MESA_SHADER_CACHE_GLSL", false);
++#endif
+ 
+  path_fail:
+ 
++#ifndef __SWITCH__
+    if (fd != -1)
+       close(fd);
++#endif
+ 
+    cache->driver_keys_blob_size = cv_size;
+ 
+@@ -448,7 +660,16 @@ disk_cache_destroy(struct disk_cache *cache)
+    if (cache && !cache->path_init_failed) {
+       util_queue_finish(&cache->cache_queue);
+       util_queue_destroy(&cache->cache_queue);
++#ifdef __SWITCH__
++      switch_index_flush(cache);
++      if (cache->index_file)
++         fclose(cache->index_file);
++      mtx_destroy(&cache->index_lock);
++      free(cache->index_path);
++      free(cache->index_mmap);
++#else
+       munmap(cache->index_mmap, cache->index_mmap_size);
++#endif
+    }
+ 
+    ralloc_free(cache);
+@@ -531,7 +752,15 @@ choose_lru_file_matching(const char *dir_path,
+          break;
+ 
+       struct stat sb;
++#ifdef __SWITCH__
++      /* newlib has no fstatat/dirfd. */
++      char entry_path[PATH_MAX];
++      snprintf(entry_path, sizeof(entry_path), "%s/%s", dir_path,
++               entry->d_name);
++      if (stat(entry_path, &sb) == 0) {
++#else
+       if (fstatat(dirfd(dir), entry->d_name, &sb, 0) == 0) {
++#endif
+          if (!lru_atime || (sb.st_atime < lru_atime)) {
+             size_t len = strlen(entry->d_name);
+ 
+@@ -597,7 +826,7 @@ unlink_lru_file_from_directory(const char *path)
+    unlink(filename);
+    free (filename);
+ 
+-   return sb.st_blocks * 512;
++   return CACHE_FILE_DISK_SIZE(sb);
+ }
+ 
+ /* Is entry a directory with a two-character name, (and not the
+@@ -702,8 +931,8 @@ disk_cache_remove(struct disk_cache *cache, const cache_key key)
+    unlink(filename);
+    free(filename);
+ 
+-   if (sb.st_blocks)
+-      p_atomic_add(cache->size, - (uint64_t)sb.st_blocks * 512);
++   if (CACHE_FILE_DISK_SIZE(sb))
++      p_atomic_add(cache->size, - CACHE_FILE_DISK_SIZE(sb));
+ }
+ 
+ static ssize_t
+@@ -781,7 +1010,12 @@ deflate_and_write_to_disk(const void *in_data, size_t in_data_size, int dest,
+    strm.next_in = (uint8_t *) in_data;
+    strm.avail_in = in_data_size;
+ 
++#ifdef __SWITCH__
++   /* Cortex-A57: level 9 costs several times more CPU for a few percent. */
++   int ret = deflateInit(&strm, Z_BEST_SPEED);
++#else
+    int ret = deflateInit(&strm, Z_BEST_COMPRESSION);
++#endif
+    if (ret != Z_OK)
+        return 0;
+ 
+@@ -905,6 +1139,14 @@ cache_put(void *job, int thread_index)
+    char *filename = NULL, *filename_tmp = NULL;
+    struct disk_cache_put_job *dc_job = (struct disk_cache_put_job *) job;
+ 
++#ifdef __SWITCH__
++   /* Horizon's fs refuses to unlink or rename a file that is still open. */
++#define unlink_tmp() \
++   do { if (fd != -1) { close(fd); fd = -1; } unlink(filename_tmp); } while (0)
++#else
++#define unlink_tmp() unlink(filename_tmp)
++#endif
++
+    filename = get_cache_file(dc_job->cache, dc_job->key);
+    if (filename == NULL)
+       goto done;
+@@ -923,7 +1165,13 @@ cache_put(void *job, int thread_index)
+    if (asprintf(&filename_tmp, "%s.tmp", filename) == -1)
+       goto done;
+ 
+-   fd = open(filename_tmp, O_WRONLY | O_CLOEXEC | O_CREAT, 0644);
++#ifdef __SWITCH__
++   /* A .tmp left over from a killed process may be longer than this entry. */
++   const int tmp_flags = O_WRONLY | O_CLOEXEC | O_CREAT | O_TRUNC;
++#else
++   const int tmp_flags = O_WRONLY | O_CLOEXEC | O_CREAT;
++#endif
++   fd = open(filename_tmp, tmp_flags, 0644);
+ 
+    /* Make the two-character subdirectory within the cache as needed. */
+    if (fd == -1) {
+@@ -932,7 +1180,7 @@ cache_put(void *job, int thread_index)
+ 
+       make_cache_file_directory(dc_job->cache, dc_job->key);
+ 
+-      fd = open(filename_tmp, O_WRONLY | O_CLOEXEC | O_CREAT, 0644);
++      fd = open(filename_tmp, tmp_flags, 0644);
+       if (fd == -1)
+          goto done;
+    }
+@@ -942,7 +1190,10 @@ cache_put(void *job, int thread_index)
+     * open with the flock held. So just let that file be responsible
+     * for writing the file.
+     */
+-#ifdef HAVE_FLOCK
++#if defined(__SWITCH__)
++   /* Single process: nobody else can be writing this entry. */
++   err = 0;
++#elif defined(HAVE_FLOCK)
+    err = flock(fd, LOCK_EX | LOCK_NB);
+ #else
+    struct flock lock = {
+@@ -964,7 +1215,7 @@ cache_put(void *job, int thread_index)
+     */
+    fd_final = open(filename, O_RDONLY | O_CLOEXEC);
+    if (fd_final != -1) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
+ 
+@@ -980,7 +1231,7 @@ cache_put(void *job, int thread_index)
+    ret = write_all(fd, dc_job->cache->driver_keys_blob,
+                    dc_job->cache->driver_keys_blob_size);
+    if (ret == -1) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
+ 
+@@ -991,7 +1242,7 @@ cache_put(void *job, int thread_index)
+    ret = write_all(fd, &dc_job->cache_item_metadata.type,
+                    sizeof(uint32_t));
+    if (ret == -1) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
+ 
+@@ -999,7 +1250,7 @@ cache_put(void *job, int thread_index)
+       ret = write_all(fd, &dc_job->cache_item_metadata.num_keys,
+                       sizeof(uint32_t));
+       if (ret == -1) {
+-         unlink(filename_tmp);
++         unlink_tmp();
+          goto done;
+       }
+ 
+@@ -1007,7 +1258,7 @@ cache_put(void *job, int thread_index)
+                       dc_job->cache_item_metadata.num_keys *
+                       sizeof(cache_key));
+       if (ret == -1) {
+-         unlink(filename_tmp);
++         unlink_tmp();
+          goto done;
+       }
+    }
+@@ -1022,7 +1273,7 @@ cache_put(void *job, int thread_index)
+    size_t cf_data_size = sizeof(cf_data);
+    ret = write_all(fd, &cf_data, cf_data_size);
+    if (ret == -1) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
+ 
+@@ -1033,12 +1284,16 @@ cache_put(void *job, int thread_index)
+    size_t file_size = deflate_and_write_to_disk(dc_job->data, dc_job->size,
+                                                 fd, filename_tmp);
+    if (file_size == 0) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
++#ifdef __SWITCH__
++   close(fd);
++   fd = -1;
++#endif
+    ret = rename(filename_tmp, filename);
+    if (ret == -1) {
+-      unlink(filename_tmp);
++      unlink_tmp();
+       goto done;
+    }
+ 
+@@ -1049,7 +1304,7 @@ cache_put(void *job, int thread_index)
+       goto done;
+    }
+ 
+-   p_atomic_add(dc_job->cache->size, sb.st_blocks * 512);
++   p_atomic_add(dc_job->cache->size, CACHE_FILE_DISK_SIZE(sb));
+ 
+  done:
+    if (fd_final != -1)
+@@ -1061,6 +1316,10 @@ cache_put(void *job, int thread_index)
+       close(fd);
+    free(filename_tmp);
+    free(filename);
++#ifdef __SWITCH__
++   switch_index_flush(dc_job->cache);
++#endif
++#undef unlink_tmp
+ }
+ 
+ void
+@@ -1290,7 +1549,14 @@ disk_cache_put_key(struct disk_cache *cache, const cache_key key)
+ 
+    entry = &cache->stored_keys[i * CACHE_KEY_SIZE];
+ 
++#ifdef __SWITCH__
++   if (memcmp(entry, key, CACHE_KEY_SIZE) == 0)
++      return;
+    memcpy(entry, key, CACHE_KEY_SIZE);
++   switch_index_mark_dirty(cache, i);
++#else
++   memcpy(entry, key, CACHE_KEY_SIZE);
++#endif
+ }
+ 
+ /* This function lets us test whether a given key was previously
+@@ -1341,4 +1607,21 @@ disk_cache_set_callbacks(struct disk_cache *cache, disk_cache_put_cb put,
+    cache->blob_get_cb = get;
+ }
+ 
++bool
++disk_cache_is_persistent(struct disk_cache *cache)
++{
++   return cache && (!cache->path_init_failed || cache->blob_put_cb);
++}
++
++bool
++disk_cache_stores_glsl(struct disk_cache *cache)
++{
++#ifdef __SWITCH__
++   return disk_cache_is_persistent(cache) &&
++          (cache->glsl_store || cache->blob_put_cb);
++#else
++   return disk_cache_is_persistent(cache);
++#endif
++}
++
+ #endif /* ENABLE_SHADER_CACHE */
+diff --git a/src/util/disk_cache.h b/src/util/disk_cache.h
+index e5dca8e..9508bd2 100644
+--- a/src/util/disk_cache.h
++++ b/src/util/disk_cache.h
+@@ -32,6 +32,7 @@
+ #include <assert.h>
+ #include <stdint.h>
+ #include <stdbool.h>
++#include <string.h>
+ #include <sys/stat.h>
+ #include "util/mesa-sha1.h"
+ 
+@@ -135,11 +136,28 @@ disk_cache_get_function_identifier(void *ptr, struct mesa_sha1 *ctx)
+    return false;
+ }
+ 
++#if defined(__SWITCH__) && defined(ENABLE_SHADER_CACHE)
++/* Defined in disk_cache.c. */
++const char *
++disk_cache_switch_build_id(void);
++#endif
++
+ static inline bool
+ disk_cache_get_function_identifier(void *ptr, struct mesa_sha1 *ctx)
+ {
++#if defined(__SWITCH__) && defined(ENABLE_SHADER_CACHE)
++   /* Horizon: Mesa is linked statically into the .nro, there is neither
++    * dladdr nor a build-id note to look at. disk_cache.c bakes an id for this
++    * build of the library instead, so program binaries and cache entries
++    * written by another Mesa build fail the driver sha1 check and get rebuilt.
++    */
++   const char *id = disk_cache_switch_build_id();
++   _mesa_sha1_update(ctx, id, strlen(id));
++   return true;
++#else
+    return false;
+ #endif
++#endif
+ }
+ 
+ /* Provide inlined stub functions if the shader cache is disabled. */
+@@ -260,6 +278,23 @@ void
+ disk_cache_set_callbacks(struct disk_cache *cache, disk_cache_put_cb put,
+                          disk_cache_get_cb get);
+ 
++/**
++ * True when disk_cache_put() can store anything: there is a cache directory
++ * or blob callbacks are set. Without either the object only provides keys
++ * (GL_ARB_get_program_binary needs those).
++ */
++bool
++disk_cache_is_persistent(struct disk_cache *cache);
++
++/**
++ * True when the GLSL front end should use the cache: skip compiles of known
++ * shaders and store linked program metadata plus the state tracker IR. On
++ * Switch that also needs MESA_SHADER_CACHE_GLSL=1: GL program binaries cover
++ * the same ground there, and the directory is meant for driver code (nvc0).
++ */
++bool
++disk_cache_stores_glsl(struct disk_cache *cache);
++
+ #else
+ 
+ static inline struct disk_cache *
+@@ -320,6 +355,18 @@ disk_cache_set_callbacks(struct disk_cache *cache, disk_cache_put_cb put,
+    return;
+ }
+ 
++static inline bool
++disk_cache_is_persistent(struct disk_cache *cache)
++{
++   return false;
++}
++
++static inline bool
++disk_cache_stores_glsl(struct disk_cache *cache)
++{
++   return false;
++}
++
+ #endif /* ENABLE_SHADER_CACHE */
+ 
+ #ifdef __cplusplus
+diff --git a/src/util/u_thread.h b/src/util/u_thread.h
+index 1f2a104..2c9ddcb 100644
+--- a/src/util/u_thread.h
++++ b/src/util/u_thread.h
+@@ -64,7 +64,9 @@ static inline thrd_t u_thread_create(int (*routine)(void *), void *param)
+    int ret;
+    ret = thrd_create( &thread, routine, param );
+ #endif
+-   if (ret)
++   /* Not 0: newlib (Switch) defines thrd_success as 4, and a started thread
++    * taken for a failure got its input freed twice by util_queue. */
++   if (ret != thrd_success)
+       return 0;
+ 
+    return thread;
