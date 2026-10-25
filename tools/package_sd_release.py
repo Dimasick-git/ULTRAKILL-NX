@@ -51,7 +51,7 @@ def main():
     patch_name = os.environ['PACKAGE_INPUT']
     patch_sha = os.environ['PACKAGE_INPUT_SHA']
     assert re.fullmatch(r'v\d+\.\d+\.\d+', tag)
-    assert re.fullmatch(r'Build_Input_\d+\.\d+\.\d+\.zip', patch_name)
+    assert re.fullmatch(r'Build_Input_\d+\.\d+\.\d+\.(?:zip|index\.json)', patch_name)
     assert re.fullmatch('[a-f0-9]{64}', patch_sha)
     work = Path('release-work/sd')
     inputs, game, output = (work / p for p in ('input', 'package', 'output'))
@@ -68,6 +68,23 @@ def main():
     gh('release', 'download', tag, '--repo', repo, '--pattern', patch_name, '--dir', str(inputs))
     patch = inputs / patch_name
     assert digest(patch) == patch_sha
+    if patch_name.endswith('.index.json'):
+        descriptor = json.loads(patch.read_text(encoding='utf-8'))
+        assert 0 < len(descriptor['parts']) <= 64
+        merged = inputs / 'assembled.zip'
+        with merged.open('wb') as dest:
+            for part in descriptor['parts']:
+                name = part['name']
+                assert re.fullmatch(r'Build_Input_[0-9.]+_\d{2}of\d{2}\.part', name)
+                gh('release', 'download', tag, '--repo', repo, '--pattern', name, '--dir', str(inputs))
+                source = inputs / name
+                assert source.stat().st_size == part['bytes']
+                assert digest(source) == part['sha256']
+                with source.open('rb') as stream:
+                    while chunk := stream.read(4 * 1024 * 1024):
+                        dest.write(chunk)
+        assert digest(merged) == descriptor['archive_sha256']
+        patch = merged
     with zipfile.ZipFile(patch) as archive:
         plan = json.loads(archive.read('__release_plan__.json'))
     assert tag == 'v' + plan['version'] and plan['base_tag'] != tag
