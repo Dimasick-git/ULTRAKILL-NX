@@ -141,9 +141,17 @@ def main():
                 with archive.open(n) as stream:
                     assert hashlib.file_digest(stream, 'sha256').hexdigest() == expected[n]['sha256'], n
         report[name] = {'bytes': target.stat().st_size, 'sha256': digest(target)}
-        gh('release', 'upload', tag, str(target), '--repo', repo)
+        latest = next(r for r in api('releases') if r['tag_name'] == tag)
+        assert latest['draft'] and not latest['prerelease']
+        existing = next((a for a in latest['assets'] if a['name'] == name), None)
+        if existing:
+            assert existing['state'] == 'uploaded' and existing['size'] == report[name]['bytes']
+            assert existing['digest'] == 'sha256:' + report[name]['sha256']
+        else:
+            gh('release', 'upload', tag, str(target), '--repo', repo)
         print('Uploaded and checked:', name, flush=True)
-    current = api('releases/' + str(draft['id']))
+    current = next(r for r in api('releases') if r['tag_name'] == tag)
+    assert current['draft'] and not current['prerelease']
     assets = {a['name']: a for a in current['assets']}
     for name, entry in report.items():
         assert assets[name]['state'] == 'uploaded' and assets[name]['size'] == entry['bytes']
