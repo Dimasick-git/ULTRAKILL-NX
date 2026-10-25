@@ -16,6 +16,10 @@ typedef unsigned Handle; typedef unsigned Result;
 #define CUR_THREAD_HANDLE 2
 #define R_SUCCEEDED(r) ((r)==0)
 #define R_FAILED(r) ((r)!=0)
+static struct {int core3,worker_core0;} config={1,1};
+static s32 priority=0x3b;
+static Result svcGetThreadPriority(s32 *p,Handle h){*p=priority;return 0;}
+static Result svcSetThreadPriority(Handle h,s32 p){priority=p;return 0;}
 static u64 permitted=7, thread_mask=7; static int fail_info,fail_thread,fail_set;
 static Result svcGetInfo(u64 *v,int type,Handle h,int sub){*v=permitted;return fail_info;}
 static Result svcGetThreadCoreMask(s32 *p,u64 *v,Handle h){*p=0;*v=thread_mask;return fail_thread;}
@@ -28,10 +32,12 @@ MAIN=r'''
 int main(void){
  uint64_t mask[2]={~0ull,~0ull};
  nx_cpu_init();assert(nx_cpu_count()==3&&nx_cpu_allowed_mask()==7);
- nx_cpu_thread_named(3,"UnityGfxDeviceWorker");assert(thread_mask==6);
- nx_cpu_thread_named(3,"Job.Worker 1");assert(thread_mask==6);
- thread_mask=1;nx_cpu_thread_named(3,"UnityMain");assert(thread_mask==1);
- nx_cpu_thread_named(3,"FMOD mixer thread");assert(thread_mask==1);
+ nx_cpu_thread_named(3,"UnityGfxDeviceWorker");assert(thread_mask==6&&priority==0x2c);
+ nx_cpu_thread_named(3,"Job.Worker 1");assert(thread_mask==7&&priority==0x2c);
+ config.worker_core0=0;nx_cpu_thread_named(3,"Job.Worker 1");assert(thread_mask==6);config.worker_core0=1;
+ thread_mask=1;nx_cpu_thread_named(3,"UnityMain");assert(thread_mask==1&&priority==0x2b);
+ nx_cpu_thread_named(3,"NX_UIMain");assert(thread_mask==1&&priority==0x2b);
+ nx_cpu_thread_named(3,"FMOD mixer thread");assert(thread_mask==6&&priority==0x2c);
  thread_mask=7;
  assert(!strcmp(nx_cpu_list(),"0,1,2\n"));assert(!strstr(nx_cpu_info(),"processor\t: 3"));
  assert(nx_sched_getaffinity(0,sizeof(mask),mask)==0&&mask[0]==7&&mask[1]==0);
@@ -47,8 +53,11 @@ int main(void){
  permitted=15;thread_mask=15;nx_cpu_init();assert(nx_cpu_count()==4&&nx_cpu_allowed_mask()==15);
  assert(strstr(nx_cpu_info(),"processor\t: 3"));mask[0]=8;
  assert(nx_sched_setaffinity(0,sizeof(mask),mask)==0&&thread_mask==8);
+ nx_cpu_thread_named(3,"UnityGfxDeviceWorker");assert(thread_mask==6);
+ nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==15);
+ config.core3=0;nx_cpu_apply_config();assert(nx_cpu_allowed_mask()==7&&nx_cpu_count()==3);config.core3=1;
  permitted=5;nx_cpu_init();assert(nx_cpu_count()==2&&!strcmp(nx_cpu_list(),"0,2\n"));
- nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==4);
+ nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==5);
  permitted=1;nx_cpu_init();thread_mask=1;nx_cpu_thread_named(3,"Job.Worker 0");assert(thread_mask==1);
  fail_info=1;thread_mask=2;nx_cpu_init();assert(nx_cpu_count()==1&&nx_cpu_allowed_mask()==2);
  fail_thread=1;nx_cpu_init();assert(nx_cpu_allowed_mask()==2);
@@ -61,6 +70,6 @@ def main():
  src='\n'.join(l for l in src.splitlines() if not l.startswith('#include'))
  with tempfile.TemporaryDirectory(prefix='nx-cpu-') as temp:
   p=Path(temp);(p/'test.c').write_text(PRE+src+MAIN)
-  subprocess.run([args.cc,'-O2','-std=gnu11',str(p/'test.c'),'-o',str(p/'test.exe')],check=True)
+  subprocess.run([args.cc,'-O2','-UNDEBUG','-std=gnu11',str(p/'test.c'),'-o',str(p/'test.exe')],check=True)
   subprocess.run([str(p/'test.exe')],check=True,timeout=15)
 if __name__=='__main__':main()

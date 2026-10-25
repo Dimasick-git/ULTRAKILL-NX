@@ -25,6 +25,9 @@ enum {ThreadActivity_Paused=1,ThreadActivity_Runnable=0,Perm_R=1};
 #define R_FAILED(x) ((x)!=0)
 static int paused[260],missing,fail_pause,fail_context,fail_query,no_read;
 static int heap_depth,gc_logging;
+static uint64_t ticks,gc_samples;
+static uint64_t armGetSystemTick(void){ticks+=100;return ticks;}
+static void nx_frame_add_gc(uint64_t elapsed){assert(elapsed==100&&!heap_depth&&gc_logging);for(int i=1;i<255;i++)assert(!paused[i]);++gc_samples;}
 static void nx_log_gc_enter(void){assert(!gc_logging);gc_logging=1;}
 static void nx_log_gc_leave(void){
   assert(gc_logging&&!heap_depth);
@@ -75,7 +78,7 @@ int main(void){
   assert(!nxb_gc_roots(1,&words)&&!words);
   assert(!nxb_gc_resume(2)&&!paused[2]);nxb_gc_end();
   assert(nx_gc_snapshot_begin());nx_gc_snapshot_end();
-  assert(!heap_depth&&!gc_logging);
+  assert(!heap_depth&&!gc_logging&&gc_samples==1);
   for(int failure=1;failure<=5;failure++){
     assert(!nxb_gc_begin());assert(!nxb_gc_pause(1,&sp));
     if(failure==1)missing=2;
@@ -106,6 +109,6 @@ def main():
     hdr='\n'.join(l for l in hdr.splitlines() if not l.startswith('#include') and not l.startswith('#pragma'))
     with tempfile.TemporaryDirectory(prefix='nx-gc-test-') as temp:
         path=Path(temp);(path/'test.c').write_text(PRE+hdr+src+MAIN)
-        subprocess.run([args.cc,'-O2','-std=gnu11',str(path/'test.c'),'-o',str(path/'test.exe')],check=True)
+        subprocess.run([args.cc,'-O2','-UNDEBUG','-std=gnu11',str(path/'test.c'),'-o',str(path/'test.exe')],check=True)
         subprocess.run([str(path/'test.exe')],check=True,timeout=15)
 if __name__=='__main__':main()
