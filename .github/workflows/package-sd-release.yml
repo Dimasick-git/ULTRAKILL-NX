@@ -1,0 +1,33 @@
+name: Package verified SD release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Destination draft release
+        required: true
+        default: v2.0.0
+      input_asset:
+        description: Hashed build input in the destination draft
+        required: true
+        default: Build_Input_2.0.0.zip
+      input_sha256:
+        description: SHA-256 of the build input
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: package-sd-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reconstruct, verify and upload two independent ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_TAG: ${{ inputs.tag }}
+          PACKAGE_INPUT: ${{ inputs.input_asset }}
+          PACKAGE_INPUT_SHA: ${{ inputs.input_sha256 }}
+        run: python3 tools/package_sd_release.py
